@@ -1,0 +1,19 @@
+[package]
+name = "cold-clear-2"
+version = "0.1.0"
+authors = ["MinusKelvin <mark.carlson@minuskelvin.net>"]
+edition = "2018"
+license = "MIT OR Apache-2.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+enum-map = "1.1.1"
+enumset = "1.0.6"
+futures = "0.3.15"
+once_cell = "1.7.2"
+serde_json = "1.0.64"
+tbp = { git = "https://github.com/tetris-bot-protocol/tbp-rs", branch = "main" }
