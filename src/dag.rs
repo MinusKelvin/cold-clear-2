@@ -12,54 +12,60 @@ use once_cell::sync::Lazy;
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
 
-pub struct Dag {
+pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
+    type Reward: Copy;
+
+    fn average(of: impl Iterator<Item = Option<Self>>) -> Self;
+}
+
+pub struct Dag<E: Evaluation> {
     root: GameState,
-    top_layer: Box<Layer>,
+    top_layer: Box<Layer<E>>,
     last_advance: Instant,
     new_nodes: AtomicU64,
 }
 
-pub struct Selection<'a> {
-    layers: Vec<&'a Layer>,
+pub struct Selection<'a, E: Evaluation> {
+    layers: Vec<&'a Layer<E>>,
     game_state: GameState,
 }
 
-pub struct ChildData {
+pub struct ChildData<E: Evaluation> {
     pub resulting_state: GameState,
     pub mv: Placement,
-    pub eval: f64,
-    pub reward: f64,
+    pub eval: E,
+    pub reward: E::Reward,
 }
 
 #[derive(Default)]
-struct Layer {
-    next_layer: Lazy<Box<Layer>>,
-    states: RwLock<HashMap<GameState, Node>>,
+struct Layer<E: Evaluation> {
+    next_layer: Lazy<Box<Layer<E>>>,
+    states: RwLock<HashMap<GameState, Node<E>>>,
     piece: Option<Piece>,
 }
 
-struct Node {
+struct Node<E: Evaluation> {
     parents: Vec<(GameState, Placement)>,
-    eval: f64,
-    children: Option<EnumMap<Piece, Vec<Child>>>,
+    eval: E,
+    children: Option<EnumMap<Piece, Vec<Child<E>>>>,
     expanding: AtomicBool,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Child {
+struct Child<E: Evaluation> {
     mv: Placement,
-    reward: f64,
-    cached_eval: f64,
+    reward: E::Reward,
+    cached_eval: E,
 }
 
-impl Dag {
+impl<E: Evaluation> Dag<E> {
     pub fn new(root: GameState, queue: impl IntoIterator<Item = Piece>) -> Self {
         let mut top_layer = Layer::default();
         top_layer.states.get_mut().unwrap().insert(
             root,
             Node {
                 parents: vec![],
-                eval: 0.0,
+                eval: E::default(),
                 children: None,
                 expanding: AtomicBool::new(false),
             },
@@ -102,7 +108,7 @@ impl Dag {
             .entry(self.root)
             .or_insert(Node {
                 parents: vec![],
-                eval: 0.0,
+                eval: E::default(),
                 children: None,
                 expanding: AtomicBool::new(false),
             });
@@ -126,7 +132,7 @@ impl Dag {
             None => return vec![],
         };
 
-        let mut candidates: Vec<&Child> = vec![];
+        let mut candidates: Vec<&_> = vec![];
         match self.top_layer.piece {
             Some(next) => {
                 candidates.extend(children[next].first());
@@ -148,7 +154,7 @@ impl Dag {
         candidates.into_iter().map(|c| c.mv).collect()
     }
 
-    pub fn select(&self) -> Option<Selection> {
+    pub fn select(&self) -> Option<Selection<E>> {
         let mut layers = vec![&*self.top_layer];
         let mut game_state = self.root;
         loop {
@@ -179,12 +185,12 @@ impl Dag {
     }
 }
 
-impl Selection<'_> {
+impl<E: Evaluation> Selection<'_, E> {
     pub fn state(&self) -> (GameState, Option<Piece>) {
         (self.game_state, self.layers.last().unwrap().piece)
     }
 
-    pub fn expand(self, children: impl IntoIterator<Item = ChildData>) {
+    pub fn expand(self, children: impl IntoIterator<Item = ChildData<E>>) {
         let mut layers = self.layers;
         let start_layer = layers.pop().unwrap();
 
@@ -207,7 +213,7 @@ impl Selection<'_> {
         }
 
         for list in childs.values_mut() {
-            list.sort_by(|a, b| a.cached_eval.partial_cmp(&b.cached_eval).unwrap().reverse());
+            list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
         }
 
         let mut next = vec![];
@@ -239,7 +245,7 @@ impl Selection<'_> {
                     .find_map(|(i, c)| (c.mv == placement).then(|| i))
                     .unwrap();
 
-                list[index].cached_eval = list[index].reward + child_eval;
+                list[index].cached_eval = child_eval + list[index].reward;
 
                 if index > 0 && list[index - 1].cached_eval < list[index].cached_eval {
                     // Shift up until the list is in order
@@ -267,18 +273,13 @@ impl Selection<'_> {
                         None => parent.bag,
                     };
 
-                    let best_for = |p: Piece| {
-                        children[p]
-                            .first()
-                            .map(|c| c.cached_eval)
-                            .unwrap_or(-1000.0)
-                    };
+                    let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
 
-                    let eval = next_possibilities
-                        .iter()
-                        .map(|p| best_for(p).max(best_for(parent.reserve)))
-                        .sum::<f64>()
-                        / next_possibilities.len() as f64;
+                    let eval = E::average(
+                        next_possibilities
+                            .iter()
+                            .map(|p| best_for(p).max(best_for(parent.reserve))),
+                    );
 
                     if node.eval != eval {
                         node.eval = eval;

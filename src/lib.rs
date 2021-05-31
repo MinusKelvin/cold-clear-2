@@ -1,8 +1,10 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
+use dag::Evaluation;
 use enumset::EnumSet;
 use futures::prelude::*;
+use ordered_float::NotNan;
 use tbp::{BotMessage, FrontendMessage};
 
 use crate::dag::Dag;
@@ -28,7 +30,7 @@ pub async fn run(
         .await
         .unwrap();
 
-    let bot = Arc::new(SharedState::<Dag>::new());
+    let bot = Arc::new(SharedState::<Dag<NotNan<f64>>>::new());
 
     spawn_workers(&bot);
 
@@ -108,7 +110,7 @@ pub async fn run(
     }
 }
 
-fn spawn_workers(bot: &Arc<SharedState<Dag>>) {
+fn spawn_workers(bot: &Arc<SharedState<Dag<NotNan<f64>>>>) {
     let bot = bot.clone();
     std::thread::spawn(move || loop {
         bot.read_op(|dag| {
@@ -118,4 +120,22 @@ fn spawn_workers(bot: &Arc<SharedState<Dag>>) {
             }
         });
     });
+}
+
+impl Evaluation for NotNan<f64> {
+    type Reward = Self;
+
+    fn average(of: impl Iterator<Item = Option<Self>>) -> Self {
+        let mut count = 0;
+        let mut sum = NotNan::new(0.0).unwrap();
+        for v in of {
+            count += 1;
+            sum += v.unwrap_or(NotNan::new(-1000.0).unwrap());
+        }
+        if count == 0 {
+            NotNan::new(-1000.0).unwrap()
+        } else {
+            sum / count as f64
+        }
+    }
 }
