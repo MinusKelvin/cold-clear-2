@@ -16,6 +16,23 @@ impl<T> SharedState<T> {
         }
     }
 
+    pub fn start(&self, data: T) {
+        let access_control = self.access_control.lock().unwrap();
+
+        *self.data.write().unwrap() = Some(data);
+        self.create_event.notify_all();
+
+        drop(access_control);
+    }
+
+    pub fn stop(&self) {
+        let access_control = self.access_control.lock().unwrap();
+
+        *self.data.write().unwrap() = None;
+
+        drop(access_control);
+    }
+
     pub fn write_op<R>(&self, op: impl FnOnce(&mut T) -> R) -> R {
         let mut access_guard = self.access_control.lock().unwrap();
         loop {
@@ -62,22 +79,5 @@ impl<T> SharedState<T> {
         let read_guard = self.data.read().unwrap();
         drop(access_guard);
         read_guard.as_ref().map(op)
-    }
-
-    pub fn stop(&self) {
-        let access_control = self.access_control.lock().unwrap();
-
-        *self.data.write().unwrap() = None;
-
-        drop(access_control);
-    }
-
-    pub fn start(&self, data: T) {
-        let access_control = self.access_control.lock().unwrap();
-
-        *self.data.write().unwrap() = Some(data);
-        self.create_event.notify_all();
-
-        drop(access_control);
     }
 }

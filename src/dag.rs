@@ -14,16 +14,28 @@ use crate::data::{GameState, Piece};
 
 pub struct Dag {
     root: GameState,
-    queue: Vec<Piece>,
     top_layer: Box<Layer>,
     last_advance: Instant,
     new_nodes: AtomicU64,
+}
+
+pub struct Selection<'a> {
+    layers: Vec<&'a Layer>,
+    game_state: GameState,
+}
+
+pub struct ChildData {
+    pub resulting_state: GameState,
+    pub mv: Placement,
+    pub eval: f64,
+    pub reward: f64,
 }
 
 #[derive(Default)]
 struct Layer {
     next_layer: Lazy<Box<Layer>>,
     states: RwLock<HashMap<GameState, Node>>,
+    piece: Option<Piece>,
 }
 
 struct Node {
@@ -40,13 +52,8 @@ struct Child {
     cached_eval: f64,
 }
 
-pub struct Selection<'a> {
-    layers: Vec<(Option<Piece>, &'a Layer)>,
-    game_state: GameState,
-}
-
 impl Dag {
-    pub fn new(root: GameState, queue: Vec<Piece>) -> Self {
+    pub fn new(root: GameState, queue: impl IntoIterator<Item = Piece>) -> Self {
         let mut top_layer = Layer::default();
         top_layer.states.get_mut().unwrap().insert(
             root,
@@ -58,9 +65,14 @@ impl Dag {
             },
         );
 
+        let mut layer = &mut top_layer;
+        for piece in queue {
+            layer.piece = Some(piece);
+            layer = &mut layer.next_layer;
+        }
+
         Dag {
             root,
-            queue,
             top_layer: Box::new(top_layer),
             last_advance: Instant::now(),
             new_nodes: AtomicU64::new(0),
@@ -76,8 +88,11 @@ impl Dag {
         self.last_advance = now;
         *self.new_nodes.get_mut() = 0;
 
-        self.root.advance(self.queue.remove(0), mv);
         let top_layer = std::mem::take(&mut *self.top_layer);
+        self.root.advance(
+            top_layer.piece.expect("cannot advance without next piece"),
+            mv,
+        );
         Lazy::force(&top_layer.next_layer);
         self.top_layer = Lazy::into_value(top_layer.next_layer).unwrap();
         self.top_layer
@@ -94,7 +109,14 @@ impl Dag {
     }
 
     pub fn add_piece(&mut self, piece: Piece) {
-        self.queue.push(piece);
+        let mut layer = &mut self.top_layer;
+        loop {
+            if layer.piece.is_none() {
+                layer.piece = Some(piece);
+                return;
+            }
+            layer = &mut layer.next_layer;
+        }
     }
 
     pub fn suggest(&self) -> Vec<Placement> {
@@ -105,8 +127,8 @@ impl Dag {
         };
 
         let mut candidates: Vec<&Child> = vec![];
-        match self.queue.first() {
-            Some(&next) => {
+        match self.top_layer.piece {
+            Some(next) => {
                 candidates.extend(children[next].first());
                 if next != self.root.reserve {
                     candidates.extend(children[self.root.reserve].first());
@@ -127,14 +149,10 @@ impl Dag {
     }
 
     pub fn select(&self) -> Option<Selection> {
-        let (first, mut queue) = match self.queue.split_first() {
-            Some((&first, rest)) => (Some(first), rest),
-            None => (None, &[] as _),
-        };
-        let mut layers: Vec<(Option<Piece>, &Layer)> = vec![(first, &self.top_layer)];
+        let mut layers = vec![&*self.top_layer];
         let mut game_state = self.root;
         loop {
-            let &(next, layer) = layers.last().unwrap();
+            let &layer = layers.last().unwrap();
             let guard = layer.states.read().unwrap();
             let node = guard.get(&game_state).expect("Link to non-existent node?");
 
@@ -149,44 +167,62 @@ impl Dag {
                 Some(children) => children,
             };
 
-            let next = next.unwrap_or_else(|| todo!("draw from bag"));
+            let next = layer.piece.unwrap_or_else(|| todo!("draw from bag"));
 
             // TODO: monte-carlo selection
             let choice = children[next].first()?.mv;
 
             game_state.advance(next, choice);
 
-            let next = queue.split_first().map(|(&next, rest)| {
-                queue = rest;
-                next
-            });
-            layers.push((next, &layer.next_layer));
+            layers.push(&layer.next_layer);
         }
     }
 }
 
 impl Selection<'_> {
     pub fn state(&self) -> (GameState, Option<Piece>) {
-        (self.game_state, self.layers.last().unwrap().0)
+        (self.game_state, self.layers.last().unwrap().piece)
     }
 
-    pub fn back_propagate(self) {
+    pub fn expand(self, children: impl IntoIterator<Item = ChildData>) {
         let mut layers = self.layers;
-        let mut next = vec![];
-        let (_, mut prev_layer) = layers.pop().unwrap();
+        let start_layer = layers.pop().unwrap();
 
-        for &(ps, mv) in &prev_layer
-            .states
-            .read()
-            .unwrap()
-            .get(&self.game_state)
-            .unwrap()
-            .parents
-        {
-            next.push((ps, mv, self.game_state));
+        let mut childs = EnumMap::<_, Vec<_>>::default();
+
+        let mut next_states = start_layer.next_layer.states.write().unwrap();
+        for child in children {
+            let node = next_states.entry(child.resulting_state).or_insert(Node {
+                parents: vec![],
+                eval: child.eval,
+                children: None,
+                expanding: AtomicBool::new(false),
+            });
+            node.parents.push((self.game_state, child.mv));
+            childs[child.mv.location.piece].push(Child {
+                mv: child.mv,
+                cached_eval: node.eval + child.reward,
+                reward: child.reward,
+            });
         }
 
-        while let Some((next_piece, layer)) = layers.pop() {
+        for list in childs.values_mut() {
+            list.sort_by(|a, b| a.cached_eval.partial_cmp(&b.cached_eval).unwrap().reverse());
+        }
+
+        let mut next = vec![];
+
+        let mut states = start_layer.states.write().unwrap();
+        let node = states.get_mut(&self.game_state).unwrap();
+        node.children = Some(childs);
+        for &(parent_state, mv) in &node.parents {
+            next.push((parent_state, mv, self.game_state));
+        }
+
+        drop(next_states);
+
+        let mut prev_layer = start_layer;
+        while let Some(layer) = layers.pop() {
             let mut next_up = vec![];
 
             for (parent, placement, child) in next {
@@ -226,7 +262,7 @@ impl Selection<'_> {
                 }
 
                 if index == 0 {
-                    let next_possibilities = match next_piece {
+                    let next_possibilities = match layer.piece {
                         Some(p) => EnumSet::only(p),
                         None => parent.bag,
                     };

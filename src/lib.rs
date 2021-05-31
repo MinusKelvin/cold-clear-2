@@ -57,7 +57,7 @@ pub async fn run(
                                 combo,
                                 bag: EnumSet::all() - reserve,
                             },
-                            queue.collect(),
+                            queue,
                         ));
                     }
                     None => {
@@ -94,7 +94,7 @@ pub async fn run(
                             reserve: piece,
                             bag: EnumSet::all() - piece,
                         },
-                        vec![],
+                        std::iter::empty(),
                     ))
                 } else {
                     bot.write_op_if_exists(|state| state.add_piece(piece));
@@ -113,7 +113,8 @@ fn spawn_workers(bot: &Arc<SharedState<Dag>>) {
     std::thread::spawn(move || loop {
         bot.read_op(|dag| {
             if let Some(node) = dag.select() {
-                node.back_propagate();
+                todo!();
+                node.expand(std::iter::empty())
             }
         });
     });
