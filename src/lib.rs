@@ -1,19 +1,19 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use dag::Evaluation;
 use enumset::EnumSet;
 use futures::prelude::*;
 use ordered_float::NotNan;
 use tbp::{BotMessage, FrontendMessage};
 
-use crate::dag::Dag;
+use crate::bot::Bot;
 use crate::data::GameState;
 use crate::sharing::SharedState;
 
+mod bot;
 mod convert;
 mod dag;
-pub mod data;
+mod data;
 mod sharing;
 
 pub async fn run(
@@ -30,7 +30,7 @@ pub async fn run(
         .await
         .unwrap();
 
-    let bot = Arc::new(SharedState::<Dag<NotNan<f64>>>::new());
+    let bot = Arc::new(SharedState::<Bot>::new());
 
     spawn_workers(&bot);
 
@@ -51,7 +51,7 @@ pub async fn run(
                 let combo = combo.min(20) as u8;
                 match hold.or_else(|| queue.next()) {
                     Some(reserve) => {
-                        bot.start(Dag::new(
+                        bot.start(Bot::new(
                             GameState {
                                 board,
                                 reserve,
@@ -83,12 +83,12 @@ pub async fn run(
                 }
             }
             FrontendMessage::Play { mv } => {
-                bot.write_op_if_exists(|state| state.advance(mv.into()));
+                bot.write_op_if_exists(|state| state.play(mv.into()));
             }
             FrontendMessage::NewPiece { piece } => {
                 let piece = piece.into();
                 if let Some((board, back_to_back, combo)) = waiting_on_first_piece.take() {
-                    bot.start(Dag::new(
+                    bot.start(Bot::new(
                         GameState {
                             board,
                             back_to_back,
@@ -99,7 +99,7 @@ pub async fn run(
                         std::iter::empty(),
                     ))
                 } else {
-                    bot.write_op_if_exists(|state| state.add_piece(piece));
+                    bot.write_op_if_exists(|state| state.new_piece(piece));
                 }
             }
             FrontendMessage::Rules {} => {
@@ -110,32 +110,9 @@ pub async fn run(
     }
 }
 
-fn spawn_workers(bot: &Arc<SharedState<Dag<NotNan<f64>>>>) {
+fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
     let bot = bot.clone();
     std::thread::spawn(move || loop {
-        bot.read_op(|dag| {
-            if let Some(node) = dag.select() {
-                todo!();
-                node.expand(std::iter::empty())
-            }
-        });
+        bot.read_op(|bot| bot.do_work());
     });
-}
-
-impl Evaluation for NotNan<f64> {
-    type Reward = Self;
-
-    fn average(of: impl Iterator<Item = Option<Self>>) -> Self {
-        let mut count = 0;
-        let mut sum = NotNan::new(0.0).unwrap();
-        for v in of {
-            count += 1;
-            sum += v.unwrap_or(NotNan::new(-1000.0).unwrap());
-        }
-        if count == 0 {
-            NotNan::new(-1000.0).unwrap()
-        } else {
-            sum / count as f64
-        }
-    }
 }
