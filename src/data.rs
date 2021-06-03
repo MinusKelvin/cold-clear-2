@@ -149,7 +149,7 @@ impl Board {
 
     pub fn remove_lines(&mut self, lines: u64) {
         for c in &mut self.cols {
-            *c = pext(*c, !lines);
+            clear_lines(c, lines);
         }
     }
 }
@@ -176,20 +176,19 @@ impl GameState {
 }
 
 #[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
-fn pext(a: u64, mask: u64) -> u64 {
-    unsafe { std::arch::x86_64::_pext_u64(a, mask) }
+fn clear_lines(col: &mut u64, lines: u64) {
+    *col = unsafe {
+        // SAFETY: #[cfg()] guard ensures that this instruction exists at compile time
+        std::arch::x86_64::_pext_u64(*col, !lines)
+    };
 }
 
 #[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
-fn pext(a: u64, mask: u64) -> u64 {
-    // FIXME: slow pext polyfill
-    let mut result = 0;
-    let mut n = 0;
-    for i in 0..64 {
-        if mask & 1 << i != 0 {
-            result |= (a & 1 << i) >> (i - n);
-            n += 1;
-        }
+fn clear_lines(col: &mut u64, mut lines: u64) {
+    while lines != 0 {
+        let i = lines.trailing_zeros();
+        let mask = (1 << i) - 1;
+        *col = *col & mask | *col >> 1 & !mask;
+        lines &= !(1 << i);
     }
-    result
 }
