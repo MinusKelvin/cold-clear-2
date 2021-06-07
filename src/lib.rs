@@ -160,7 +160,7 @@ mod profile {
         total_time: Duration,
     }
 
-    pub fn profiling_frame_end() {
+    pub fn profiling_frame_end(nodes: u64, time: Duration) {
         let report = std::fs::OpenOptions::new()
             .append(true)
             .create(true)
@@ -171,16 +171,19 @@ mod profile {
         let mut data = PROFILE_DATA.lock().unwrap();
         let total_time: Duration = data.values().map(|d| d.total_time).sum();
         writeln!(report, "Total time: {:.2?}", total_time).unwrap();
+        writeln!(report, "{:.0} nodes/second", nodes as f64 / time.as_secs_f64());
         for (name, data) in data.iter_mut() {
             writeln!(
                 report,
-                "{name:20} {spent:.2?} ({percent:.2}%)   avg: {avg:.2?}",
+                "{name:20} {spent:.2?} ({percent:.2}%) invocations: {invocations}   avg: {avg:.2?}",
                 name = name,
                 spent = data.total_time,
+                invocations = data.invocations,
                 percent = data.total_time.as_secs_f64() / total_time.as_secs_f64() * 100.0,
                 avg = data.total_time / data.invocations
             )
             .unwrap();
+            *data = ProfileData::default();
         }
         writeln!(report).unwrap();
     }
@@ -202,5 +205,5 @@ mod profile {
         fn drop(&mut self) {}
     }
 
-    pub fn profiling_frame_end() {}
+    pub fn profiling_frame_end(_nodes: u64, _time: std::time::Duration) {}
 }

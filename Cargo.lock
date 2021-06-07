@@ -21,6 +21,7 @@ dependencies = [
  "futures",
  "once_cell",
  "ordered-float",
+ "rand",
  "serde_json",
  "tbp",
 ]

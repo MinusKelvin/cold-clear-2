@@ -8,10 +8,12 @@ use std::time::Instant;
 use enum_map::EnumMap;
 use enumset::EnumSet;
 use once_cell::sync::Lazy;
+use rand::prelude::*;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
 use crate::profile::ProfileScope;
+use crate::profile::profiling_frame_end;
 
 pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
     type Reward: Copy;
@@ -47,7 +49,7 @@ struct Layer<E: Evaluation> {
 }
 
 struct Node<E: Evaluation> {
-    parents: Vec<(GameState, Placement)>,
+    parents: Vec<(GameState, Placement, Piece)>,
     eval: E,
     children: Option<EnumMap<Piece, Vec<Child<E>>>>,
     expanding: AtomicBool,
@@ -89,10 +91,7 @@ impl<E: Evaluation> Dag<E> {
 
     pub fn advance(&mut self, mv: Placement) {
         let now = Instant::now();
-        eprintln!(
-            "{:.0} nodes/second",
-            *self.new_nodes.get_mut() as f64 / now.duration_since(self.last_advance).as_secs_f64()
-        );
+        profiling_frame_end(*self.new_nodes.get_mut(), now.duration_since(self.last_advance));
         self.last_advance = now;
         *self.new_nodes.get_mut() = 0;
 
@@ -138,16 +137,10 @@ impl<E: Evaluation> Dag<E> {
         match self.top_layer.piece {
             Some(next) => {
                 candidates.extend(children[next].first());
-                if next != self.root.reserve {
-                    candidates.extend(children[self.root.reserve].first());
-                }
             }
             None => {
                 for piece in self.root.bag {
                     candidates.extend(children[piece].first());
-                }
-                if !self.root.bag.contains(self.root.reserve) {
-                    candidates.extend(children[self.root.reserve].first());
                 }
             }
         };
@@ -185,7 +178,7 @@ impl<E: Evaluation> Dag<E> {
             let next = layer.piece?;
 
             // TODO: monte-carlo selection
-            let choice = children[next].first()?.mv;
+            let choice = children[next].choose(&mut thread_rng())?.mv;
 
             game_state.advance(next, choice);
 
@@ -199,7 +192,7 @@ impl<E: Evaluation> Selection<'_, E> {
         (self.game_state, self.layers.last().unwrap().piece)
     }
 
-    pub fn expand(self, children: impl IntoIterator<Item = ChildData<E>>) {
+    pub fn expand(self, children: EnumMap<Piece, Vec<ChildData<E>>>) {
         let scope = ProfileScope::new("expand");
 
         let mut layers = self.layers;
@@ -208,15 +201,18 @@ impl<E: Evaluation> Selection<'_, E> {
         let mut childs = EnumMap::<_, Vec<_>>::default();
 
         let mut next_states = start_layer.next_layer.states.write().unwrap();
-        for child in children {
+        for (next, child) in children
+            .into_iter()
+            .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
+        {
             let node = next_states.entry(child.resulting_state).or_insert(Node {
                 parents: vec![],
                 eval: child.eval,
                 children: None,
                 expanding: AtomicBool::new(false),
             });
-            node.parents.push((self.game_state, child.mv));
-            childs[child.mv.location.piece].push(Child {
+            node.parents.push((self.game_state, child.mv, next));
+            childs[next].push(Child {
                 mv: child.mv,
                 cached_eval: node.eval + child.reward,
                 reward: child.reward,
@@ -236,8 +232,8 @@ impl<E: Evaluation> Selection<'_, E> {
         let mut states = start_layer.states.write().unwrap();
         let node = states.get_mut(&self.game_state).unwrap();
         node.children = Some(childs);
-        for &(parent_state, mv) in &node.parents {
-            next.push((parent_state, mv, self.game_state));
+        for &(parent_state, mv, n) in &node.parents {
+            next.push((parent_state, mv, n, self.game_state));
         }
 
         drop(next_states);
@@ -250,13 +246,13 @@ impl<E: Evaluation> Selection<'_, E> {
         while let Some(layer) = layers.pop() {
             let mut next_up = vec![];
 
-            for (parent, placement, child) in next {
+            for (parent, placement, next, child) in next {
                 let mut guard = layer.states.write().unwrap();
                 let node = guard.get_mut(&parent).unwrap();
                 let child_eval = prev_layer.states.read().unwrap().get(&child).unwrap().eval;
 
                 let children = node.children.as_mut().unwrap();
-                let list = &mut children[placement.location.piece];
+                let list = &mut children[next];
 
                 let mut index = list
                     .iter()
@@ -303,8 +299,8 @@ impl<E: Evaluation> Selection<'_, E> {
                     if node.eval != eval {
                         node.eval = eval;
 
-                        for &(ps, mv) in &node.parents {
-                            next_up.push((ps, mv, parent));
+                        for &(ps, mv, next) in &node.parents {
+                            next_up.push((ps, mv, next, parent));
                         }
                     }
                 }
