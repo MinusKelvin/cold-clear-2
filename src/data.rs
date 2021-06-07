@@ -58,8 +58,8 @@ impl Piece {
             Piece::T => [(-1, 0), (0, 0), (1, 0), (0, 1)],
             Piece::L => [(-1, 0), (0, 0), (1, 0), (1, 1)],
             Piece::J => [(-1, 0), (0, 0), (1, 0), (-1, 1)],
-            Piece::S => [(-1, 0), (0, 0), (1, 0), (1, 1)],
-            Piece::Z => [(-1, 1), (0, 0), (1, 0), (0, 1)],
+            Piece::S => [(-1, 0), (0, 0), (0, 1), (1, 1)],
+            Piece::Z => [(-1, 1), (0, 1), (0, 0), (1, 0)],
         }
     }
 }
@@ -115,6 +115,69 @@ impl PieceLocation {
 
     const fn translate(&self, (x, y): (i8, i8)) -> (i8, i8) {
         (x + self.x, y + self.y)
+    }
+
+    pub fn obstructed(&self, board: &Board) -> bool {
+        self.cells().iter().any(|&cell| board.occupied(cell))
+    }
+
+    pub fn drop_distance(&self, board: &Board) -> i8 {
+        self.cells()
+            .iter()
+            .map(|&(x, y)| board.distance_to_ground(x, y))
+            .min()
+            .unwrap()
+    }
+
+    pub fn canonical_form(&self) -> PieceLocation {
+        match self.piece {
+            Piece::T | Piece::J | Piece::L => *self,
+            Piece::O => match self.rotation {
+                Rotation::North => *self,
+                Rotation::East => PieceLocation {
+                    rotation: Rotation::North,
+                    y: self.y - 1,
+                    ..*self
+                },
+                Rotation::South => PieceLocation {
+                    rotation: Rotation::North,
+                    x: self.x - 1,
+                    y: self.y - 1,
+                    ..*self
+                },
+                Rotation::West => PieceLocation {
+                    rotation: Rotation::North,
+                    x: self.x - 1,
+                    ..*self
+                },
+            },
+            Piece::S | Piece::Z => match self.rotation {
+                Rotation::North | Rotation::East => *self,
+                Rotation::South => PieceLocation {
+                    rotation: Rotation::North,
+                    y: self.y - 1,
+                    ..*self
+                },
+                Rotation::West => PieceLocation {
+                    rotation: Rotation::East,
+                    x: self.x - 1,
+                    ..*self
+                },
+            },
+            Piece::I => match self.rotation {
+                Rotation::North | Rotation::East => *self,
+                Rotation::South => PieceLocation {
+                    rotation: Rotation::North,
+                    x: self.x - 1,
+                    ..*self
+                },
+                Rotation::West => PieceLocation {
+                    rotation: Rotation::East,
+                    y: self.y + 1,
+                    ..*self
+                },
+            },
+        }
     }
 }
 
