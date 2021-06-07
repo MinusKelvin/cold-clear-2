@@ -277,5 +277,6 @@ fn clear_lines(col: &mut u64, mut lines: u64) {
         let mask = (1 << i) - 1;
         *col = *col & mask | *col >> 1 & !mask;
         lines &= !(1 << i);
+        lines >>= 1;
     }
 }
