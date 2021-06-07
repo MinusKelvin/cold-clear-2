@@ -173,7 +173,8 @@ impl<E: Evaluation> Dag<E> {
                 Some(children) => children,
             };
 
-            let next = layer.piece.unwrap_or_else(|| todo!("draw from bag"));
+            // TODO: draw from bag
+            let next = layer.piece?;
 
             // TODO: monte-carlo selection
             let choice = children[next].first()?.mv;
@@ -226,6 +227,7 @@ impl<E: Evaluation> Selection<'_, E> {
         }
 
         drop(next_states);
+        drop(states);
 
         let mut prev_layer = start_layer;
         while let Some(layer) = layers.pop() {

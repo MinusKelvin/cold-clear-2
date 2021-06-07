@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use enumset::EnumSet;
 use futures::prelude::*;
-use ordered_float::NotNan;
 use tbp::{BotMessage, FrontendMessage};
 
 use crate::bot::Bot;
@@ -14,6 +13,7 @@ mod bot;
 mod convert;
 mod dag;
 mod data;
+mod movegen;
 mod sharing;
 
 pub async fn run(

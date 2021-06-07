@@ -91,7 +91,15 @@ impl From<Placement> for tbp::Move {
 }
 
 impl From<[[Option<char>; 10]; 40]> for Board {
-    fn from(_: [[Option<char>; 10]; 40]) -> Self {
-        todo!()
+    fn from(board: [[Option<char>; 10]; 40]) -> Self {
+        let mut cols = [0; 10];
+        for y in 0..40 {
+            for x in 0..10 {
+                if board[y][x].is_some() {
+                    cols[x] |= 1 << y;
+                }
+            }
+        }
+        Board { cols }
     }
 }

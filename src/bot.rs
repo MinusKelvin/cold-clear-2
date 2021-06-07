@@ -1,7 +1,8 @@
 use ordered_float::NotNan;
 
-use crate::dag::{Dag, Evaluation};
+use crate::dag::{ChildData, Dag, Evaluation};
 use crate::data::{GameState, Piece, Placement};
+use crate::movegen;
 
 pub struct Bot {
     dag: Dag<NotNan<f64>>
@@ -28,7 +29,29 @@ impl Bot {
 
     pub fn do_work(&self) {
         if let Some(node) = self.dag.select() {
-            node.expand(std::iter::empty())
+            let (state, next) = node.state();
+            let next_possibilities = match next {
+                Some(p) => p | state.reserve,
+                None => state.bag | state.reserve,
+            };
+
+            let mut children = vec![];
+
+            for next in next_possibilities {
+                for (mv, sd_distance) in movegen::find_moves(&state.board, next) {
+                    let mut resulting_state = state;
+                    resulting_state.advance(next, mv);
+
+                    children.push(ChildData {
+                        resulting_state,
+                        mv,
+                        eval: NotNan::new(0.0).unwrap(),
+                        reward: NotNan::new(0.0).unwrap(),
+                    });
+                }
+            }
+
+            node.expand(children);
         }
     }
 }
