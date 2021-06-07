@@ -7,31 +7,64 @@ use crate::profile::ProfileScope;
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
     let _scope = ProfileScope::new("movegen");
 
-    let mut spawned = PieceLocation {
-        piece,
-        rotation: Rotation::North,
-        x: 4,
-        y: 19,
-    };
-    if spawned.obstructed(board) {
-        spawned.y += 1;
-        if spawned.obstructed(board) {
-            return vec![];
+    let mut queue = BinaryHeap::with_capacity(64);
+    let mut values = HashMap::with_capacity(64);
+
+    let fast_mode;
+    if board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16) {
+        fast_mode = true;
+        for &rotation in &[
+            Rotation::North,
+            Rotation::East,
+            Rotation::South,
+            Rotation::West,
+        ] {
+            for x in 0..10 {
+                let mut location = PieceLocation {
+                    piece,
+                    rotation,
+                    x,
+                    y: 20,
+                };
+                if location.obstructed(board) {
+                    continue;
+                }
+                location.y -= location.drop_distance(board);
+                let mv = Placement {
+                    location,
+                    spin: Spin::None,
+                };
+                queue.push(Intermediate { mv, soft_drops: 0 });
+                values.insert(mv, 0);
+            }
         }
+    } else {
+        fast_mode = false;
+
+        let mut spawned = PieceLocation {
+            piece,
+            rotation: Rotation::North,
+            x: 4,
+            y: 19,
+        };
+        if spawned.obstructed(board) {
+            spawned.y += 1;
+            if spawned.obstructed(board) {
+                return vec![];
+            }
+        }
+        let spawned = Placement {
+            location: spawned,
+            spin: Spin::None,
+        };
+        queue.push(Intermediate {
+            soft_drops: 0,
+            mv: spawned,
+        });
+        values.insert(spawned, 0);
     }
-    let spawned = Placement {
-        location: spawned,
-        spin: Spin::None,
-    };
 
     let mut locks = HashMap::new();
-    let mut queue = BinaryHeap::new();
-    let mut values = HashMap::new();
-    queue.push(Intermediate {
-        soft_drops: 0,
-        mv: spawned,
-    });
-    values.insert(spawned, 0);
 
     while let Some(expand) = queue.pop() {
         if expand.soft_drops != values.get(&expand.mv).copied().unwrap_or(40) {
@@ -60,6 +93,9 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
         *sds = expand.soft_drops.min(*sds);
 
         let mut update_position = |target: Placement, soft_drops: u32| {
+            if fast_mode && target.location.above_stack(&board) {
+                return;
+            }
             let prev_sds = values.entry(target).or_insert(40);
             if soft_drops < *prev_sds {
                 *prev_sds = soft_drops;

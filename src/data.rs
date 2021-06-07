@@ -138,6 +138,12 @@ impl PieceLocation {
             .unwrap()
     }
 
+    pub fn above_stack(&self, board: &Board) -> bool {
+        self.cells()
+            .iter()
+            .all(|&(x, y)| y >= 64 - board.cols[x as usize].leading_zeros() as i8)
+    }
+
     pub fn canonical_form(&self) -> PieceLocation {
         match self.piece {
             Piece::T | Piece::J | Piece::L => *self,
