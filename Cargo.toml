@@ -10,6 +10,9 @@ crate-type = ["rlib", "cdylib"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[features]
+profile = []
+
 [dependencies]
 enum-map = "1.1.1"
 enumset = "1.0.6"

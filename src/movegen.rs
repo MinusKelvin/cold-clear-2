@@ -1,9 +1,12 @@
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::{BinaryHeap, HashMap};
 
 use crate::data::*;
+use crate::profile::ProfileScope;
 
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
+    let _scope = ProfileScope::new("movegen");
+
     let mut spawned = PieceLocation {
         piece,
         rotation: Rotation::North,

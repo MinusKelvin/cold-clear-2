@@ -116,3 +116,91 @@ fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
         bot.read_op(|bot| bot.do_work());
     });
 }
+
+#[cfg(feature = "profile")]
+mod profile {
+    use std::collections::HashMap;
+    use std::io::Write;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use std::time::Instant;
+
+    use once_cell::sync::Lazy;
+
+    pub struct ProfileScope {
+        name: &'static str,
+        start: Instant,
+    }
+
+    impl ProfileScope {
+        pub fn new(name: &'static str) -> Self {
+            ProfileScope {
+                name,
+                start: Instant::now(),
+            }
+        }
+    }
+
+    impl Drop for ProfileScope {
+        fn drop(&mut self) {
+            let elapsed = self.start.elapsed();
+            let mut lock = PROFILE_DATA.lock().unwrap();
+            let data = lock.entry(self.name).or_default();
+            data.invocations += 1;
+            data.total_time += elapsed;
+        }
+    }
+
+    static PROFILE_DATA: Lazy<Mutex<HashMap<&'static str, ProfileData>>> =
+        Lazy::new(Default::default);
+
+    #[derive(Default)]
+    struct ProfileData {
+        invocations: u32,
+        total_time: Duration,
+    }
+
+    pub fn profiling_frame_end() {
+        let report = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open("profile.txt")
+            .unwrap();
+        let mut report = std::io::BufWriter::new(report);
+
+        let mut data = PROFILE_DATA.lock().unwrap();
+        let total_time: Duration = data.values().map(|d| d.total_time).sum();
+        writeln!(report, "Total time: {:.2?}", total_time).unwrap();
+        for (name, data) in data.iter_mut() {
+            writeln!(
+                report,
+                "{name:20} {spent:.2?} ({percent:.2}%)   avg: {avg:.2?}",
+                name = name,
+                spent = data.total_time,
+                percent = data.total_time.as_secs_f64() / total_time.as_secs_f64() * 100.0,
+                avg = data.total_time / data.invocations
+            )
+            .unwrap();
+        }
+        writeln!(report).unwrap();
+    }
+}
+
+#[cfg(not(feature = "profile"))]
+mod profile {
+    pub struct ProfileScope {
+        _priv: (),
+    }
+
+    impl ProfileScope {
+        pub fn new(_name: &'static str) -> Self {
+            ProfileScope { _priv: () }
+        }
+    }
+
+    impl Drop for ProfileScope {
+        fn drop(&mut self) {}
+    }
+
+    pub fn profiling_frame_end() {}
+}

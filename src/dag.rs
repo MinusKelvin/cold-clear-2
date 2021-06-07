@@ -11,6 +11,7 @@ use once_cell::sync::Lazy;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
+use crate::profile::ProfileScope;
 
 pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
     type Reward: Copy;
@@ -28,6 +29,7 @@ pub struct Dag<E: Evaluation> {
 pub struct Selection<'a, E: Evaluation> {
     layers: Vec<&'a Layer<E>>,
     game_state: GameState,
+    new_nodes: &'a AtomicU64,
 }
 
 pub struct ChildData<E: Evaluation> {
@@ -155,6 +157,8 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn select(&self) -> Option<Selection<E>> {
+        let _scope = ProfileScope::new("select");
+
         let mut layers = vec![&*self.top_layer];
         let mut game_state = self.root;
         loop {
@@ -167,7 +171,11 @@ impl<E: Evaluation> Dag<E> {
                     if node.expanding.swap(true, atomic::Ordering::Acquire) {
                         return None;
                     } else {
-                        return Some(Selection { layers, game_state });
+                        return Some(Selection {
+                            layers,
+                            game_state,
+                            new_nodes: &self.new_nodes,
+                        });
                     }
                 }
                 Some(children) => children,
@@ -192,6 +200,8 @@ impl<E: Evaluation> Selection<'_, E> {
     }
 
     pub fn expand(self, children: impl IntoIterator<Item = ChildData<E>>) {
+        let scope = ProfileScope::new("expand");
+
         let mut layers = self.layers;
         let start_layer = layers.pop().unwrap();
 
@@ -212,6 +222,10 @@ impl<E: Evaluation> Selection<'_, E> {
                 reward: child.reward,
             });
         }
+        self.new_nodes.fetch_add(
+            childs.values().map(|l| l.len() as u64).sum(),
+            atomic::Ordering::Relaxed,
+        );
 
         for list in childs.values_mut() {
             list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
@@ -228,6 +242,9 @@ impl<E: Evaluation> Selection<'_, E> {
 
         drop(next_states);
         drop(states);
+
+        drop(scope);
+        let _scope = ProfileScope::new("backprop");
 
         let mut prev_layer = start_layer;
         while let Some(layer) = layers.pop() {

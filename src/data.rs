@@ -31,6 +31,15 @@ pub struct Placement {
     pub spin: Spin,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct PlacementInfo {
+    pub lines_cleared: u32,
+    pub combo: u32,
+    pub spin: Spin,
+    pub back_to_back: bool,
+    pub perfect_clear: bool,
+}
+
 #[derive(EnumSetType, Enum, Debug, Hash)]
 pub enum Piece {
     I,
@@ -218,7 +227,7 @@ impl Board {
 }
 
 impl GameState {
-    pub fn advance(&mut self, next: Piece, placement: Placement) {
+    pub fn advance(&mut self, next: Piece, placement: Placement) -> PlacementInfo {
         self.bag.remove(next);
         if self.bag.is_empty() {
             self.bag = EnumSet::all();
@@ -228,12 +237,21 @@ impl GameState {
         }
         self.board.place(placement.location);
         let cleared_mask = self.board.line_clears();
+        let mut back_to_back = false;
         if cleared_mask != 0 {
             self.board.remove_lines(cleared_mask);
-            self.back_to_back =
-                cleared_mask.count_ones() == 4 || !matches!(placement.spin, Spin::None);
+            let hard = cleared_mask.count_ones() == 4 || !matches!(placement.spin, Spin::None);
+            back_to_back = hard && self.back_to_back;
+            self.back_to_back = hard;
         } else {
             self.combo = 0;
+        }
+        PlacementInfo {
+            lines_cleared: cleared_mask.count_ones(),
+            combo: self.combo as u32,
+            spin: placement.spin,
+            back_to_back,
+            perfect_clear: self.board.cols.iter().all(|&c| c == 0),
         }
     }
 }
