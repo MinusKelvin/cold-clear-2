@@ -17,6 +17,7 @@ name = "cold-clear-2"
 version = "0.1.0"
 dependencies = [
  "enum-map",
+ "enum_dispatch",
  "enumset",
  "futures",
  "once_cell",
@@ -76,6 +77,18 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84278eae0af6e34ff6c1db44c11634a694aafac559ff3080e4db4e4ac35907aa"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "enum_dispatch"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd53b3fde38a39a06b2e66dc282f3e86191e53bd04cc499929c15742beae3df8"
+dependencies = [
+ "once_cell",
  "proc-macro2",
  "quote",
  "syn",

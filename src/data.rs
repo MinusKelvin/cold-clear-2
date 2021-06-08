@@ -33,9 +33,9 @@ pub struct Placement {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct PlacementInfo {
+    pub placement: Placement,
     pub lines_cleared: u32,
     pub combo: u32,
-    pub spin: Spin,
     pub back_to_back: bool,
     pub perfect_clear: bool,
 }
@@ -253,9 +253,9 @@ impl GameState {
             self.combo = 0;
         }
         PlacementInfo {
+            placement,
             lines_cleared: cleared_mask.count_ones(),
             combo: self.combo as u32,
-            spin: placement.spin,
             back_to_back,
             perfect_clear: self.board.cols.iter().all(|&c| c == 0),
         }

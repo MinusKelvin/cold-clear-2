@@ -63,7 +63,7 @@ struct Child<E: Evaluation> {
 }
 
 impl<E: Evaluation> Dag<E> {
-    pub fn new(root: GameState, queue: impl IntoIterator<Item = Piece>) -> Self {
+    pub fn new(root: GameState, queue: &[Piece]) -> Self {
         let mut top_layer = Layer::default();
         top_layer.states.get_mut().unwrap().insert(
             root,
@@ -76,7 +76,7 @@ impl<E: Evaluation> Dag<E> {
         );
 
         let mut layer = &mut top_layer;
-        for piece in queue {
+        for &piece in queue {
             layer.piece = Some(piece);
             layer = &mut layer.next_layer;
         }

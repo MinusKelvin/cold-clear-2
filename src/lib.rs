@@ -59,7 +59,7 @@ pub async fn run(
                                 combo,
                                 bag: EnumSet::all() - reserve,
                             },
-                            queue,
+                            &queue.collect::<Vec<_>>(),
                         ));
                     }
                     None => {
@@ -83,7 +83,7 @@ pub async fn run(
                 }
             }
             FrontendMessage::Play { mv } => {
-                bot.write_op_if_exists(|state| state.play(mv.into()));
+                bot.write_op_if_exists(|state| state.advance(mv.into()));
             }
             FrontendMessage::NewPiece { piece } => {
                 let piece = piece.into();
@@ -96,7 +96,7 @@ pub async fn run(
                             reserve: piece,
                             bag: EnumSet::all() - piece,
                         },
-                        std::iter::empty(),
+                        &[],
                     ))
                 } else {
                     bot.write_op_if_exists(|state| state.new_piece(piece));
@@ -172,7 +172,7 @@ mod profile {
         let total_time: Duration = data.values().map(|d| d.total_time).sum();
         writeln!(report, "Total time: {:.2?}", total_time).unwrap();
         writeln!(report, "{:.0} nodes/second", nodes as f64 / time.as_secs_f64());
-        for (name, data) in data.iter_mut() {
+        for (name, data) in data.drain() {
             writeln!(
                 report,
                 "{name:20} {spent:.2?} ({percent:.2}%) invocations: {invocations}   avg: {avg:.2?}",
@@ -183,7 +183,6 @@ mod profile {
                 avg = data.total_time / data.invocations
             )
             .unwrap();
-            *data = ProfileData::default();
         }
         writeln!(report).unwrap();
     }
