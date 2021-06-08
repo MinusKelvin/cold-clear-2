@@ -81,6 +81,7 @@ impl Mode for Freestyle {
 struct Weights {
     cell_coveredness: f32,
     max_cell_covered_height: u32,
+    row_transitions: f32,
 
     has_back_to_back: f32,
     wasted_t: f32,
@@ -98,6 +99,7 @@ struct Weights {
 static DEFAULT_WEIGHTS: Weights = Weights {
     cell_coveredness: -0.2,
     max_cell_covered_height: 6,
+    row_transitions: -0.1,
 
     has_back_to_back: 0.5,
     wasted_t: -1.5,
@@ -149,17 +151,27 @@ fn evaluate(
     reward += weights.softdrop * softdrop as f32;
 
     // cell coveredness
+    let mut coveredness = 0;
     for &c in &state.board.cols {
         let height = 64 - c.leading_zeros();
         let underneath = (1 << height) - 1;
-        let mut holes = c & underneath;
+        let mut holes = !c & underneath;
         while holes != 0 {
             let y = holes.trailing_zeros();
-            let coveredness = (height - y).min(weights.max_cell_covered_height);
-            eval += weights.cell_coveredness * coveredness as f32;
+            coveredness += (height - y).min(weights.max_cell_covered_height);
             holes &= !(1 << y);
         }
     }
+    eval += weights.cell_coveredness * coveredness as f32;
+
+    // row transitions
+    let mut row_transitions = 0;
+    row_transitions += (!0 ^ state.board.cols[0]).count_ones();
+    row_transitions += (!0 ^ state.board.cols[9]).count_ones();
+    for cs in state.board.cols.windows(2) {
+        row_transitions += (cs[0] ^ cs[1]).count_ones();
+    }
+    eval += row_transitions as f32 * weights.row_transitions;
 
     (
         Eval { value: eval.into() },

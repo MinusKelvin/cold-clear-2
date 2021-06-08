@@ -12,8 +12,8 @@ use rand::prelude::*;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
-use crate::profile::ProfileScope;
 use crate::profile::profiling_frame_end;
+use crate::profile::ProfileScope;
 
 pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
     type Reward: Copy;
@@ -91,7 +91,10 @@ impl<E: Evaluation> Dag<E> {
 
     pub fn advance(&mut self, mv: Placement) {
         let now = Instant::now();
-        profiling_frame_end(*self.new_nodes.get_mut(), now.duration_since(self.last_advance));
+        profiling_frame_end(
+            *self.new_nodes.get_mut(),
+            now.duration_since(self.last_advance),
+        );
         self.last_advance = now;
         *self.new_nodes.get_mut() = 0;
 
@@ -177,8 +180,17 @@ impl<E: Evaluation> Dag<E> {
             // TODO: draw from bag
             let next = layer.piece?;
 
-            // TODO: monte-carlo selection
-            let choice = children[next].choose(&mut thread_rng())?.mv;
+            if children[next].is_empty() {
+                return None;
+            }
+
+            let choice = loop {
+                let s: f32 = thread_rng().gen();
+                let i = -s.log2().floor() as usize;
+                if i < children[next].len() {
+                    break children[next][i].mv;
+                }
+            };
 
             game_state.advance(next, choice);
 
@@ -193,125 +205,137 @@ impl<E: Evaluation> Selection<'_, E> {
     }
 
     pub fn expand(self, children: EnumMap<Piece, Vec<ChildData<E>>>) {
-        let scope = ProfileScope::new("expand");
-
         let mut layers = self.layers;
         let start_layer = layers.pop().unwrap();
+        let next = expand(start_layer, self.new_nodes, self.game_state, children);
+        backprop(start_layer, layers, next);
+    }
+}
 
-        let mut childs = EnumMap::<_, Vec<_>>::default();
+fn expand<E: Evaluation>(
+    layer: &Layer<E>,
+    new_nodes: &AtomicU64,
+    parent_state: GameState,
+    children: EnumMap<Piece, Vec<ChildData<E>>>,
+) -> Vec<(GameState, Placement, Piece, GameState)> {
+    let _scope = ProfileScope::new("expand");
 
-        let mut next_states = start_layer.next_layer.states.write().unwrap();
-        for (next, child) in children
-            .into_iter()
-            .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
-        {
-            let node = next_states.entry(child.resulting_state).or_insert(Node {
-                parents: vec![],
-                eval: child.eval,
-                children: None,
-                expanding: AtomicBool::new(false),
-            });
-            node.parents.push((self.game_state, child.mv, next));
-            childs[next].push(Child {
-                mv: child.mv,
-                cached_eval: node.eval + child.reward,
-                reward: child.reward,
-            });
-        }
-        self.new_nodes.fetch_add(
-            childs.values().map(|l| l.len() as u64).sum(),
-            atomic::Ordering::Relaxed,
-        );
+    let mut childs = EnumMap::<_, Vec<_>>::default();
 
-        for list in childs.values_mut() {
-            list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
-        }
+    let mut next_states = layer.next_layer.states.write().unwrap();
+    for (next, child) in children
+        .into_iter()
+        .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
+    {
+        let node = next_states.entry(child.resulting_state).or_insert(Node {
+            parents: vec![],
+            eval: child.eval,
+            children: None,
+            expanding: AtomicBool::new(false),
+        });
+        node.parents.push((parent_state, child.mv, next));
+        childs[next].push(Child {
+            mv: child.mv,
+            cached_eval: node.eval + child.reward,
+            reward: child.reward,
+        });
+    }
+    new_nodes.fetch_add(
+        childs.values().map(|l| l.len() as u64).sum(),
+        atomic::Ordering::Relaxed,
+    );
 
-        let mut next = vec![];
+    for list in childs.values_mut() {
+        list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
+    }
 
-        let mut states = start_layer.states.write().unwrap();
-        let node = states.get_mut(&self.game_state).unwrap();
-        node.children = Some(childs);
-        for &(parent_state, mv, n) in &node.parents {
-            next.push((parent_state, mv, n, self.game_state));
-        }
+    let mut next = vec![];
 
-        drop(next_states);
-        drop(states);
+    let mut states = layer.states.write().unwrap();
+    let node = states.get_mut(&parent_state).unwrap();
+    node.children = Some(childs);
+    for &(grandparent, mv, n) in &node.parents {
+        next.push((grandparent, mv, n, parent_state));
+    }
 
-        drop(scope);
-        let _scope = ProfileScope::new("backprop");
+    next
+}
 
-        let mut prev_layer = start_layer;
-        while let Some(layer) = layers.pop() {
-            let mut next_up = vec![];
+fn backprop<'a, E: Evaluation>(
+    mut prev_layer: &'a Layer<E>,
+    mut layers: Vec<&'a Layer<E>>,
+    mut next: Vec<(GameState, Placement, Piece, GameState)>,
+) {
+    let _scope = ProfileScope::new("backprop");
 
-            for (parent, placement, next, child) in next {
-                let mut guard = layer.states.write().unwrap();
-                let node = guard.get_mut(&parent).unwrap();
-                let child_eval = prev_layer.states.read().unwrap().get(&child).unwrap().eval;
+    while let Some(layer) = layers.pop() {
+        let mut next_up = vec![];
 
-                let children = node.children.as_mut().unwrap();
-                let list = &mut children[next];
+        for (parent, placement, next, child) in next {
+            let mut guard = layer.states.write().unwrap();
+            let node = guard.get_mut(&parent).unwrap();
+            let child_eval = prev_layer.states.read().unwrap().get(&child).unwrap().eval;
 
-                let mut index = list
-                    .iter()
-                    .enumerate()
-                    .find_map(|(i, c)| (c.mv == placement).then(|| i))
-                    .unwrap();
+            let children = node.children.as_mut().unwrap();
+            let list = &mut children[next];
 
-                list[index].cached_eval = child_eval + list[index].reward;
+            let mut index = list
+                .iter()
+                .enumerate()
+                .find_map(|(i, c)| (c.mv == placement).then(|| i))
+                .unwrap();
 
-                if index > 0 && list[index - 1].cached_eval < list[index].cached_eval {
-                    // Shift up until the list is in order
-                    let hole = list[index];
-                    while index > 0 && list[index - 1].cached_eval < hole.cached_eval {
-                        list[index] = list[index - 1];
-                        index -= 1;
-                    }
-                    list[index] = hole;
-                } else if index < list.len() - 1
-                    && list[index + 1].cached_eval > list[index].cached_eval
-                {
-                    // Shift down until the list is in order
-                    let hole = list[index];
-                    while index < list.len() - 1 && list[index + 1].cached_eval > hole.cached_eval {
-                        list[index] = list[index + 1];
-                        index += 1;
-                    }
-                    list[index] = hole;
+            list[index].cached_eval = child_eval + list[index].reward;
+
+            if index > 0 && list[index - 1].cached_eval < list[index].cached_eval {
+                // Shift up until the list is in order
+                let hole = list[index];
+                while index > 0 && list[index - 1].cached_eval < hole.cached_eval {
+                    list[index] = list[index - 1];
+                    index -= 1;
                 }
+                list[index] = hole;
+            } else if index < list.len() - 1
+                && list[index + 1].cached_eval > list[index].cached_eval
+            {
+                // Shift down until the list is in order
+                let hole = list[index];
+                while index < list.len() - 1 && list[index + 1].cached_eval > hole.cached_eval {
+                    list[index] = list[index + 1];
+                    index += 1;
+                }
+                list[index] = hole;
+            }
 
-                if index == 0 {
-                    let next_possibilities = match layer.piece {
-                        Some(p) => EnumSet::only(p),
-                        None => parent.bag,
-                    };
+            if index == 0 {
+                let next_possibilities = match layer.piece {
+                    Some(p) => EnumSet::only(p),
+                    None => parent.bag,
+                };
 
-                    let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
+                let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
 
-                    let eval = E::average(
-                        next_possibilities
-                            .iter()
-                            .map(|p| best_for(p).max(best_for(parent.reserve))),
-                    );
+                let eval = E::average(
+                    next_possibilities
+                        .iter()
+                        .map(|p| best_for(p).max(best_for(parent.reserve))),
+                );
 
-                    if node.eval != eval {
-                        node.eval = eval;
+                if node.eval != eval {
+                    node.eval = eval;
 
-                        for &(ps, mv, next) in &node.parents {
-                            next_up.push((ps, mv, next, parent));
-                        }
+                    for &(ps, mv, next) in &node.parents {
+                        next_up.push((ps, mv, next, parent));
                     }
                 }
             }
+        }
 
-            next = next_up;
-            prev_layer = layer;
+        next = next_up;
+        prev_layer = layer;
 
-            if next.is_empty() {
-                break;
-            }
+        if next.is_empty() {
+            break;
         }
     }
 }
