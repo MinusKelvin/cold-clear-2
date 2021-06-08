@@ -1,14 +1,14 @@
 use std::collections::HashMap;
-use std::sync::atomic;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
-use std::sync::RwLock;
+use std::sync::atomic::{self};
 use std::time::Instant;
 
 use enum_map::EnumMap;
 use enumset::EnumSet;
 use once_cell::sync::Lazy;
 use rand::prelude::*;
+use parking_lot::RwLock;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
@@ -65,7 +65,7 @@ struct Child<E: Evaluation> {
 impl<E: Evaluation> Dag<E> {
     pub fn new(root: GameState, queue: &[Piece]) -> Self {
         let mut top_layer = Layer::default();
-        top_layer.states.get_mut().unwrap().insert(
+        top_layer.states.get_mut().insert(
             root,
             Node {
                 parents: vec![],
@@ -108,7 +108,6 @@ impl<E: Evaluation> Dag<E> {
         self.top_layer
             .states
             .get_mut()
-            .unwrap()
             .entry(self.root)
             .or_insert(Node {
                 parents: vec![],
@@ -130,7 +129,7 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn suggest(&self) -> Vec<Placement> {
-        let states = self.top_layer.states.read().unwrap();
+        let states = self.top_layer.states.read();
         let children = match &states.get(&self.root).unwrap().children {
             Some(children) => children,
             None => return vec![],
@@ -159,7 +158,7 @@ impl<E: Evaluation> Dag<E> {
         let mut game_state = self.root;
         loop {
             let &layer = layers.last().unwrap();
-            let guard = layer.states.read().unwrap();
+            let guard = layer.states.read();
             let node = guard.get(&game_state).expect("Link to non-existent node?");
 
             let children = match &node.children {
@@ -218,8 +217,8 @@ fn expand<E: Evaluation>(
 
     let mut childs = EnumMap::<_, Vec<_>>::default();
 
-    let mut states = layer.states.write().unwrap();
-    let mut next_states = layer.next_layer.states.write().unwrap();
+    let mut states = layer.states.write();
+    let mut next_states = layer.next_layer.states.write();
     for (next, child) in children
         .into_iter()
         .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
@@ -268,9 +267,9 @@ fn backprop<'a, E: Evaluation>(
         let mut next_up = vec![];
 
         for (parent, placement, next, child) in next {
-            let mut guard = layer.states.write().unwrap();
+            let mut guard = layer.states.write();
             let node = guard.get_mut(&parent).unwrap();
-            let child_eval = prev_layer.states.read().unwrap().get(&child).unwrap().eval;
+            let child_eval = prev_layer.states.read().get(&child).unwrap().eval;
 
             let children = node.children.as_mut().unwrap();
             let list = &mut children[next];
