@@ -59,14 +59,13 @@ impl Mode for Freestyle {
                     moves[state.reserve].iter()
                 });
                 for &(mv, sd_distance) in moves {
-                    let mut resulting_state = state;
-                    let info = resulting_state.advance(next, mv);
+                    let mut state = state;
+                    let info = state.advance(next, mv);
 
-                    let (eval, reward) =
-                        evaluate(&DEFAULT_WEIGHTS, &resulting_state, &info, sd_distance);
+                    let (eval, reward) = evaluate(&DEFAULT_WEIGHTS, state, &info, sd_distance);
 
                     children[next].push(ChildData {
-                        resulting_state,
+                        resulting_state: state,
                         mv,
                         eval,
                         reward,
@@ -87,6 +86,7 @@ struct Weights {
     height: f32,
     height_upper_half: f32,
     height_upper_quarter: f32,
+    tslot: [f32; 4],
 
     has_back_to_back: f32,
     wasted_t: f32,
@@ -109,10 +109,11 @@ static DEFAULT_WEIGHTS: Weights = Weights {
     height: -0.4,
     height_upper_half: -1.5,
     height_upper_quarter: -5.0,
+    tslot: [0.1, 1.5, 2.0, 4.0],
 
     has_back_to_back: 0.5,
     wasted_t: -1.5,
-    softdrop: -0.1,
+    softdrop: -0.2,
 
     normal_clears: [0.0, -1.5, -1.0, -0.5, 4.0],
     mini_spin_clears: [0.0, -1.5, -1.0],
@@ -125,7 +126,7 @@ static DEFAULT_WEIGHTS: Weights = Weights {
 
 fn evaluate(
     weights: &Weights,
-    state: &GameState,
+    mut state: GameState,
     info: &PlacementInfo,
     softdrop: u32,
 ) -> (Eval, Reward) {
@@ -158,6 +159,26 @@ fn evaluate(
         eval += weights.has_back_to_back;
     }
     reward += weights.softdrop * softdrop as f32;
+
+    // cutouts
+    let cutout_count = state.bag.contains(Piece::T) as usize
+        + (state.reserve == Piece::T) as usize
+        + (state.bag.len() <= 3) as usize;
+    for _ in 0..cutout_count {
+        let location = well_known_tslot_left(&state.board)
+            .or_else(|| well_known_tslot_right(&state.board));
+        let location = match location {
+            Some(v) => v,
+            None => break
+        };
+        let mut board = state.board;
+        board.place(location);
+        eval += weights.tslot[board.line_clears().count_ones() as usize];
+        if board.line_clears().count_ones() > 1 {
+            board.remove_lines(board.line_clears());
+            state.board = board;
+        }
+    }
 
     // holes
     eval += weights.holes
@@ -193,7 +214,7 @@ fn evaluate(
         .cols
         .iter()
         .map(|&c| 64 - c.leading_zeros())
-        .min()
+        .max()
         .unwrap();
     eval += weights.height * highest_point as f32;
     if highest_point > 10 {
@@ -218,6 +239,56 @@ fn evaluate(
             value: reward.into(),
         },
     )
+}
+
+fn well_known_tslot_left(board: &Board) -> Option<PieceLocation> {
+    for (x, cols) in board.cols.windows(3).enumerate() {
+        let y = 64 - cols[0].leading_zeros();
+        if 64 - cols[1].leading_zeros() >= y {
+            continue;
+        }
+        if !board.occupied((x as i8 + 2, y as i8 - 1)) {
+            continue;
+        }
+        if board.occupied((x as i8 + 2, y as i8)) {
+            continue;
+        }
+        if !board.occupied((x as i8 + 2, y as i8 + 1)) {
+            continue;
+        }
+        return Some(PieceLocation {
+            piece: Piece::T,
+            rotation: Rotation::South,
+            x: x as i8 + 1,
+            y: y as i8,
+        })
+    }
+    None
+}
+
+fn well_known_tslot_right(board: &Board) -> Option<PieceLocation> {
+    for (x, cols) in board.cols.windows(3).enumerate() {
+        let y = 64 - cols[2].leading_zeros();
+        if 64 - cols[1].leading_zeros() >= y {
+            continue;
+        }
+        if !board.occupied((x as i8, y as i8 - 1)) {
+            continue;
+        }
+        if board.occupied((x as i8, y as i8)) {
+            continue;
+        }
+        if !board.occupied((x as i8, y as i8 + 1)) {
+            continue;
+        }
+        return Some(PieceLocation {
+            piece: Piece::T,
+            rotation: Rotation::South,
+            x: x as i8 + 1,
+            y: y as i8,
+        })
+    }
+    None
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
