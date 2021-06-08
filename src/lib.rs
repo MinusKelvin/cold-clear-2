@@ -111,10 +111,12 @@ pub async fn run(
 }
 
 fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
-    let bot = bot.clone();
-    std::thread::spawn(move || loop {
-        bot.read_op(|bot| bot.do_work());
-    });
+    for _ in 0..16 {
+        let bot = bot.clone();
+        std::thread::spawn(move || loop {
+            bot.read_op(|bot| bot.do_work());
+        });
+    }
 }
 
 #[cfg(feature = "profile")]

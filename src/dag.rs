@@ -218,6 +218,7 @@ fn expand<E: Evaluation>(
 
     let mut childs = EnumMap::<_, Vec<_>>::default();
 
+    let mut states = layer.states.write().unwrap();
     let mut next_states = layer.next_layer.states.write().unwrap();
     for (next, child) in children
         .into_iter()
@@ -247,7 +248,6 @@ fn expand<E: Evaluation>(
 
     let mut next = vec![];
 
-    let mut states = layer.states.write().unwrap();
     let node = states.get_mut(&parent_state).unwrap();
     node.children = Some(childs);
     for &(grandparent, mv, n) in &node.parents {
