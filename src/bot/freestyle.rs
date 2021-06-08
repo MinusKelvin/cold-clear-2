@@ -62,7 +62,8 @@ impl Mode for Freestyle {
                     let mut resulting_state = state;
                     let info = resulting_state.advance(next, mv);
 
-                    let (eval, reward) = evaluate(&DEFAULT_WEIGHTS, &state, &info, sd_distance);
+                    let (eval, reward) =
+                        evaluate(&DEFAULT_WEIGHTS, &resulting_state, &info, sd_distance);
 
                     children[next].push(ChildData {
                         resulting_state,
@@ -81,7 +82,11 @@ impl Mode for Freestyle {
 struct Weights {
     cell_coveredness: f32,
     max_cell_covered_height: u32,
+    holes: f32,
     row_transitions: f32,
+    height: f32,
+    height_upper_half: f32,
+    height_upper_quarter: f32,
 
     has_back_to_back: f32,
     wasted_t: f32,
@@ -99,7 +104,11 @@ struct Weights {
 static DEFAULT_WEIGHTS: Weights = Weights {
     cell_coveredness: -0.2,
     max_cell_covered_height: 6,
+    holes: -1.5,
     row_transitions: -0.1,
+    height: -0.4,
+    height_upper_half: -1.5,
+    height_upper_quarter: -5.0,
 
     has_back_to_back: 0.5,
     wasted_t: -1.5,
@@ -150,6 +159,20 @@ fn evaluate(
     }
     reward += weights.softdrop * softdrop as f32;
 
+    // holes
+    eval += weights.holes
+        * state
+            .board
+            .cols
+            .iter()
+            .map(|&c| {
+                let height = 64 - c.leading_zeros();
+                let underneath = (1 << height) - 1;
+                let holes = !c & underneath;
+                holes.count_ones()
+            })
+            .sum::<u32>() as f32;
+
     // cell coveredness
     let mut coveredness = 0;
     for &c in &state.board.cols {
@@ -163,6 +186,22 @@ fn evaluate(
         }
     }
     eval += weights.cell_coveredness * coveredness as f32;
+
+    // height
+    let highest_point = state
+        .board
+        .cols
+        .iter()
+        .map(|&c| 64 - c.leading_zeros())
+        .min()
+        .unwrap();
+    eval += weights.height * highest_point as f32;
+    if highest_point > 10 {
+        eval += weights.height_upper_half * (highest_point - 10) as f32;
+    }
+    if highest_point > 15 {
+        eval += weights.height_upper_quarter * (highest_point - 15) as f32;
+    }
 
     // row transitions
     let mut row_transitions = 0;
