@@ -13,6 +13,7 @@ mod bot;
 mod convert;
 mod dag;
 mod data;
+mod map;
 mod movegen;
 mod sharing;
 
@@ -173,9 +174,16 @@ mod profile {
         let mut data = PROFILE_DATA.lock().unwrap();
         let total_time: Duration = data.values().map(|d| d.total_time).sum();
         writeln!(report, "Total time: {:.2?}", total_time).unwrap();
-        writeln!(report, "{:.0} nodes/second", nodes as f64 / time.as_secs_f64()).unwrap();
+        writeln!(
+            report,
+            "{} nodes in {:.2?} ({:.1} kn/s)",
+            nodes,
+            time,
+            nodes as f64 / time.as_secs_f64() / 1000.0
+        )
+        .unwrap();
         let mut data: Vec<_> = data.drain().collect();
-        data.sort_by_key(|(_, d)| d.total_time);
+        data.sort_by_key(|(_, d)| std::cmp::Reverse(d.total_time / d.invocations));
         for (name, data) in data {
             writeln!(
                 report,
