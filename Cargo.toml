@@ -14,6 +14,7 @@ crate-type = ["rlib", "cdylib"]
 profile = []
 
 [dependencies]
+ahash = "0.7.4"
 enum-map = "1.1.1"
 enum_dispatch = "0.3.7"
 enumset = "1.0.6"

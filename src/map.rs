@@ -1,4 +1,3 @@
-use std::collections::hash_map::RandomState;
 use std::convert::TryInto;
 use std::hash::BuildHasher;
 use std::hash::Hash;
@@ -14,7 +13,7 @@ use parking_lot::RwLockWriteGuard;
 use crate::data::GameState;
 use crate::profile::ProfileScope;
 
-pub struct StateMap<V, S = RandomState> {
+pub struct StateMap<V, S = ahash::RandomState> {
     hasher: S,
     buckets: Box<[RwLock<IntMap<u64, V>>; SHARDS]>,
 }
