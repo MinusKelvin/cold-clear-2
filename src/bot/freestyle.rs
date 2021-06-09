@@ -165,11 +165,11 @@ fn evaluate(
         + (state.reserve == Piece::T) as usize
         + (state.bag.len() <= 3) as usize;
     for _ in 0..cutout_count {
-        let location = well_known_tslot_left(&state.board)
-            .or_else(|| well_known_tslot_right(&state.board));
+        let location =
+            well_known_tslot_left(&state.board).or_else(|| well_known_tslot_right(&state.board));
         let location = match location {
             Some(v) => v,
-            None => break
+            None => break,
         };
         let mut board = state.board;
         board.place(location);
@@ -261,7 +261,7 @@ fn well_known_tslot_left(board: &Board) -> Option<PieceLocation> {
             rotation: Rotation::South,
             x: x as i8 + 1,
             y: y as i8,
-        })
+        });
     }
     None
 }
@@ -286,7 +286,7 @@ fn well_known_tslot_right(board: &Board) -> Option<PieceLocation> {
             rotation: Rotation::South,
             x: x as i8 + 1,
             y: y as i8,
-        })
+        });
     }
     None
 }

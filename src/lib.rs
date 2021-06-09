@@ -33,6 +33,7 @@ pub async fn run(
 
     let bot = Arc::new(SharedState::<Bot>::new());
 
+    profile::setup_thread();
     spawn_workers(&bot);
 
     let mut waiting_on_first_piece = None;
@@ -114,94 +115,22 @@ pub async fn run(
 fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
     for _ in 0..16 {
         let bot = bot.clone();
-        std::thread::spawn(move || loop {
-            bot.read_op(|bot| bot.do_work());
+        std::thread::spawn(move || {
+            profile::setup_thread();
+            loop {
+                bot.read_op(|bot| bot.do_work());
+            }
         });
     }
 }
 
 #[cfg(feature = "profile")]
-mod profile {
-    use std::collections::HashMap;
-    use std::io::Write;
-    use std::sync::Mutex;
-    use std::time::Duration;
-    use std::time::Instant;
-
-    use once_cell::sync::Lazy;
-
-    pub struct ProfileScope {
-        name: &'static str,
-        start: Instant,
-    }
-
-    impl ProfileScope {
-        pub fn new(name: &'static str) -> Self {
-            ProfileScope {
-                name,
-                start: Instant::now(),
-            }
-        }
-    }
-
-    impl Drop for ProfileScope {
-        fn drop(&mut self) {
-            let elapsed = self.start.elapsed();
-            let mut lock = PROFILE_DATA.lock().unwrap();
-            let data = lock.entry(self.name).or_default();
-            data.invocations += 1;
-            data.total_time += elapsed;
-        }
-    }
-
-    static PROFILE_DATA: Lazy<Mutex<HashMap<&'static str, ProfileData>>> =
-        Lazy::new(Default::default);
-
-    #[derive(Default)]
-    struct ProfileData {
-        invocations: u32,
-        total_time: Duration,
-    }
-
-    pub fn profiling_frame_end(nodes: u64, time: Duration) {
-        let report = std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open("profile.txt")
-            .unwrap();
-        let mut report = std::io::BufWriter::new(report);
-
-        let mut data = PROFILE_DATA.lock().unwrap();
-        let total_time: Duration = data.values().map(|d| d.total_time).sum();
-        writeln!(report, "Total time: {:.2?}", total_time).unwrap();
-        writeln!(
-            report,
-            "{} nodes in {:.2?} ({:.1} kn/s)",
-            nodes,
-            time,
-            nodes as f64 / time.as_secs_f64() / 1000.0
-        )
-        .unwrap();
-        let mut data: Vec<_> = data.drain().collect();
-        data.sort_by_key(|(_, d)| std::cmp::Reverse(d.total_time / d.invocations));
-        for (name, data) in data {
-            writeln!(
-                report,
-                "{name:20} {spent:.2?} ({percent:.2}%) invocations: {invocations}   avg: {avg:.2?}",
-                name = name,
-                spent = data.total_time,
-                invocations = data.invocations,
-                percent = data.total_time.as_secs_f64() / total_time.as_secs_f64() * 100.0,
-                avg = data.total_time / data.invocations
-            )
-            .unwrap();
-        }
-        writeln!(report).unwrap();
-    }
-}
+mod profile;
 
 #[cfg(not(feature = "profile"))]
 mod profile {
+    use std::io::Write;
+
     pub struct ProfileScope {
         _priv: (),
     }
@@ -216,5 +145,22 @@ mod profile {
         fn drop(&mut self) {}
     }
 
-    pub fn profiling_frame_end(_nodes: u64, _time: std::time::Duration) {}
+    pub fn setup_thread() {}
+
+    pub fn profiling_frame_end(nodes: u64, time: std::time::Duration) {
+        let report = std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open("profile.txt")
+            .unwrap();
+        let mut report = std::io::BufWriter::new(report);
+        writeln!(
+            report,
+            "{} nodes in {:.2?} ({:.1} kn/s)",
+            nodes,
+            time,
+            nodes as f64 / time.as_secs_f64() / 1000.0
+        )
+        .unwrap();
+    }
 }

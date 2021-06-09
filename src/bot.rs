@@ -3,6 +3,7 @@ use std::collections::VecDeque;
 use enum_dispatch::enum_dispatch;
 
 use crate::data::{GameState, Piece, Placement};
+use crate::profile::ProfileScope;
 
 mod freestyle;
 
@@ -57,6 +58,7 @@ impl Bot {
     }
 
     pub fn do_work(&self) {
+        let _scope = ProfileScope::new("do_work");
         self.mode.do_work();
     }
 
