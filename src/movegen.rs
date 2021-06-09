@@ -24,12 +24,11 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                     piece,
                     rotation,
                     x,
-                    y: 20,
+                    y: 19,
                 };
                 if location.obstructed(board) {
                     continue;
                 }
-                location.y -= location.drop_distance(board);
                 let mv = Placement {
                     location,
                     spin: Spin::None,
@@ -92,8 +91,8 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             .or_insert(expand.soft_drops);
         *sds = expand.soft_drops.min(*sds);
 
-        let mut update_position = |target: Placement, soft_drops: u32| {
-            if fast_mode && target.location.above_stack(&board) {
+        let mut update_position = |skip_above_stack: bool, target: Placement, soft_drops: u32| {
+            if skip_above_stack && target.location.above_stack(&board) {
                 return;
             }
             let prev_sds = values.entry(target).or_insert(40);
@@ -106,19 +105,19 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             }
         };
 
-        update_position(dropped, expand.soft_drops + drop_dist as u32);
+        update_position(false, dropped, expand.soft_drops + drop_dist as u32);
 
         if let Some(mv) = shift(expand.mv.location, board, -1) {
-            update_position(mv, expand.soft_drops);
+            update_position(fast_mode, mv, expand.soft_drops);
         }
         if let Some(mv) = shift(expand.mv.location, board, 1) {
-            update_position(mv, expand.soft_drops);
+            update_position(fast_mode, mv, expand.soft_drops);
         }
         if let Some(mv) = rotate_cw(expand.mv.location, board) {
-            update_position(mv, expand.soft_drops);
+            update_position(fast_mode, mv, expand.soft_drops);
         }
         if let Some(mv) = rotate_ccw(expand.mv.location, board) {
-            update_position(mv, expand.soft_drops);
+            update_position(fast_mode, mv, expand.soft_drops);
         }
     }
 
