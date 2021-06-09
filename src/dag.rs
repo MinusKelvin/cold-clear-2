@@ -264,6 +264,16 @@ fn expand<E: Evaluation>(
         list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
     }
 
+    let next_possibilities = match layer.piece {
+        Some(p) => EnumSet::only(p),
+        None => parent.bag,
+    };
+    parent.eval = E::average(
+        next_possibilities
+            .iter()
+            .map(|p| childs[p].first().map(|c| c.cached_eval)),
+    );
+
     let mut boxed_slice_childs = EnumMap::default();
     for (k, v) in childs {
         boxed_slice_childs[k] = v.into_boxed_slice();
