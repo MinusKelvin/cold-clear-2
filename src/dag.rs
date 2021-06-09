@@ -192,9 +192,13 @@ impl<E: Evaluation> Dag<E> {
                 return None;
             }
 
-            let s: f64 = thread_rng().gen();
-            let i = (s * s * children[next].len() as f64) as usize;
-            let choice = children[next][i].mv;
+            let choice = loop {
+                let s: f64 = thread_rng().gen();
+                let i = -s.log2() as usize;
+                if i < children[next].len() {
+                    break children[next][i].mv;
+                }
+            };
 
             game_state.advance(next, choice);
 

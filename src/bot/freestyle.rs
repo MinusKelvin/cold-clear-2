@@ -86,6 +86,7 @@ struct Weights {
     height: f32,
     height_upper_half: f32,
     height_upper_quarter: f32,
+    tetris_well_depth: f32,
     tslot: [f32; 4],
 
     has_back_to_back: f32,
@@ -109,13 +110,14 @@ static DEFAULT_WEIGHTS: Weights = Weights {
     height: -0.4,
     height_upper_half: -1.5,
     height_upper_quarter: -5.0,
+    tetris_well_depth: 0.3,
     tslot: [0.1, 1.5, 2.0, 4.0],
 
     has_back_to_back: 0.5,
     wasted_t: -1.5,
     softdrop: -0.2,
 
-    normal_clears: [0.0, -1.5, -1.0, -0.5, 4.0],
+    normal_clears: [0.0, -2.0, -1.5, -1.0, 3.5],
     mini_spin_clears: [0.0, -1.5, -1.0],
     spin_clears: [0.0, 1.0, 4.0, 6.0],
     back_to_back_clear: 1.0,
@@ -209,6 +211,26 @@ fn evaluate(
         }
     }
     eval += weights.cell_coveredness * coveredness as f32;
+
+    // tetris well depth
+    let (tetris_well_column, tetris_well_height) = state
+        .board
+        .cols
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| (i, 64 - c.leading_zeros()))
+        .min_by_key(|&(_, h)| h)
+        .unwrap();
+    let full_lines_except_well = state
+        .board
+        .cols
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != tetris_well_column)
+        .map(|(_, &c)| c)
+        .fold(!0, |a, b| a & b);
+    let tetris_well_depth = (full_lines_except_well >> tetris_well_height).trailing_ones();
+    eval += tetris_well_depth as f32 * weights.tetris_well_depth;
 
     // height
     let highest_point = state
