@@ -152,8 +152,10 @@ fn evaluate(
     }
 
     // checklist
-    if info.placement.location.piece == Piece::T && !matches!(info.placement.spin, Spin::Full) {
-        reward += weights.wasted_t;
+    if info.placement.location.piece == Piece::T {
+        if info.lines_cleared < 2 || !matches!(info.placement.spin, Spin::Full) {
+            reward += weights.wasted_t;
+        }
     }
     if state.back_to_back {
         eval += weights.has_back_to_back;
