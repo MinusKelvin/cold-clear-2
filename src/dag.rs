@@ -7,10 +7,11 @@ use enum_map::EnumMap;
 use enumset::EnumSet;
 use once_cell::sync::Lazy;
 use rand::prelude::*;
+use smallvec::SmallVec;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
-use crate::map::Map;
+use crate::map::StateMap;
 use crate::profile::profiling_frame_end;
 use crate::profile::ProfileScope;
 
@@ -43,15 +44,18 @@ pub struct ChildData<E: Evaluation> {
 #[derive(Default)]
 struct Layer<E: Evaluation> {
     next_layer: Lazy<Box<Layer<E>>>,
-    states: Map<GameState, Node<E>>,
+    states: StateMap<Node<E>>,
     piece: Option<Piece>,
 }
 
 struct Node<E: Evaluation> {
-    parents: Vec<(GameState, Placement, Piece)>,
+    parents: SmallVec<[(u64, Placement, Piece); 1]>,
     eval: E,
-    children: Option<EnumMap<Piece, Vec<Child<E>>>>,
+    children: Option<EnumMap<Piece, Box<[Child<E>]>>>,
     expanding: AtomicBool,
+    // we need this info while backpropagating, but we don't have access to the game state then
+    bag: EnumSet<Piece>,
+    reserve: Piece,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -65,12 +69,14 @@ impl<E: Evaluation> Dag<E> {
     pub fn new(root: GameState, queue: &[Piece]) -> Self {
         let mut top_layer = Layer::default();
         top_layer.states.insert(
-            root,
+            &root,
             Node {
-                parents: vec![],
+                parents: SmallVec::new(),
                 eval: E::default(),
                 children: None,
                 expanding: AtomicBool::new(false),
+                bag: root.bag,
+                reserve: root.reserve,
             },
         );
 
@@ -108,11 +114,13 @@ impl<E: Evaluation> Dag<E> {
         let _ = self
             .top_layer
             .states
-            .get_or_insert_with(self.root, || Node {
-                parents: vec![],
+            .get_or_insert_with(&self.root, || Node {
+                parents: SmallVec::new(),
                 eval: E::default(),
                 children: None,
                 expanding: AtomicBool::new(false),
+                bag: self.root.bag,
+                reserve: self.root.reserve,
             });
     }
 
@@ -213,27 +221,30 @@ fn expand<E: Evaluation>(
     new_nodes: &AtomicU64,
     parent_state: GameState,
     children: EnumMap<Piece, Vec<ChildData<E>>>,
-) -> Vec<(GameState, Placement, Piece, GameState)> {
+) -> Vec<(u64, Placement, Piece, u64)> {
     let _scope = ProfileScope::new("expand");
 
     let mut childs = EnumMap::<_, Vec<_>>::default();
 
     // We need to acquire the lock on the parent since the backprop routine needs the children
     // lists to exist, and they won't if we're still creating them
-    let mut parent = layer.states.get_mut(&parent_state).unwrap();
+    let parent_index = layer.states.index(&parent_state);
+    let mut parent = layer.states.get_raw_mut(parent_index).unwrap();
 
     let next_states = &layer.next_layer.states;
     for (next, child) in children
         .into_iter()
         .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
     {
-        let mut node = next_states.get_or_insert_with(child.resulting_state, || Node {
-            parents: vec![],
+        let mut node = next_states.get_or_insert_with(&child.resulting_state, || Node {
+            parents: SmallVec::new(),
             eval: child.eval,
             children: None,
             expanding: AtomicBool::new(false),
+            bag: child.resulting_state.bag,
+            reserve: child.resulting_state.reserve,
         });
-        node.parents.push((parent_state, child.mv, next));
+        node.parents.push((parent_index, child.mv, next));
         childs[next].push(Child {
             mv: child.mv,
             cached_eval: node.eval + child.reward,
@@ -249,11 +260,16 @@ fn expand<E: Evaluation>(
         list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
     }
 
+    let mut boxed_slice_childs = EnumMap::default();
+    for (k, v) in childs {
+        boxed_slice_childs[k] = v.into_boxed_slice();
+    }
+    parent.children = Some(boxed_slice_childs);
+
     let mut next = vec![];
 
-    parent.children = Some(childs);
     for &(grandparent, mv, n) in &parent.parents {
-        next.push((grandparent, mv, n, parent_state));
+        next.push((grandparent, mv, n, parent_index));
     }
 
     next
@@ -262,18 +278,20 @@ fn expand<E: Evaluation>(
 fn backprop<'a, E: Evaluation>(
     mut prev_layer: &'a Layer<E>,
     mut layers: Vec<&'a Layer<E>>,
-    mut next: Vec<(GameState, Placement, Piece, GameState)>,
+    mut next: Vec<(u64, Placement, Piece, u64)>,
 ) {
     let _scope = ProfileScope::new("backprop");
 
     while let Some(layer) = layers.pop() {
         let mut next_up = vec![];
 
-        for (parent, placement, next, child) in next {
-            let mut node = layer.states.get_mut(&parent).unwrap();
-            let child_eval = prev_layer.states.get(&child).unwrap().eval;
+        for (parent_index, placement, next, child_index) in next {
+            let mut parent = layer.states.get_raw_mut(parent_index).unwrap();
+            let child_eval = prev_layer.states.get_raw(child_index).unwrap().eval;
 
-            let children = node.children.as_mut().unwrap();
+            let parent_bag = parent.bag;
+            let parent_reserve = parent.reserve;
+            let children = parent.children.as_mut().unwrap();
             let list = &mut children[next];
 
             let mut index = list
@@ -307,7 +325,7 @@ fn backprop<'a, E: Evaluation>(
             if index == 0 {
                 let next_possibilities = match layer.piece {
                     Some(p) => EnumSet::only(p),
-                    None => parent.bag,
+                    None => parent_bag,
                 };
 
                 let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
@@ -315,14 +333,14 @@ fn backprop<'a, E: Evaluation>(
                 let eval = E::average(
                     next_possibilities
                         .iter()
-                        .map(|p| best_for(p).max(best_for(parent.reserve))),
+                        .map(|p| best_for(p).max(best_for(parent_reserve))),
                 );
 
-                if node.eval != eval {
-                    node.eval = eval;
+                if parent.eval != eval {
+                    parent.eval = eval;
 
-                    for &(ps, mv, next) in &node.parents {
-                        next_up.push((ps, mv, next, parent));
+                    for &(ps, mv, next) in &parent.parents {
+                        next_up.push((ps, mv, next, parent_index));
                     }
                 }
             }

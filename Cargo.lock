@@ -26,11 +26,13 @@ dependencies = [
  "enum_dispatch",
  "enumset",
  "futures",
+ "intmap",
  "once_cell",
  "ordered-float",
  "parking_lot",
  "rand",
  "serde_json",
+ "smallvec",
  "tbp",
 ]
 
@@ -247,6 +249,12 @@ checksum = "61124eeebbd69b8190558df225adf7e4caafce0d743919e5d6b19652314ec5ec"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "intmap"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e50930385956f6c4a0b99f3dd654adcc40788456c36e17c5b20e1d1ceb523ec6"
 
 [[package]]
 name = "itoa"
