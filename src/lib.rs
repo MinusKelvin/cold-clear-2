@@ -113,7 +113,7 @@ pub async fn run(
 }
 
 fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
-    for _ in 0..16 {
+    for _ in 0..1 {
         let bot = bot.clone();
         std::thread::spawn(move || {
             profile::setup_thread();
@@ -147,6 +147,8 @@ mod profile {
 
     pub fn setup_thread() {}
 
+    static TOTALS: once_cell::sync::Lazy<parking_lot::Mutex<(u64, std::time::Duration)>> = once_cell::sync::Lazy::new(Default::default);
+
     pub fn profiling_frame_end(nodes: u64, time: std::time::Duration) {
         let report = std::fs::OpenOptions::new()
             .append(true)
@@ -154,12 +156,16 @@ mod profile {
             .open("profile.txt")
             .unwrap();
         let mut report = std::io::BufWriter::new(report);
+        let mut data = TOTALS.lock();
+        data.0 += nodes;
+        data.1 += time;
         writeln!(
             report,
-            "{} nodes in {:.2?} ({:.1} kn/s)",
+            "{} nodes in {:.2?} ({:.1} kn/s, {:.1} kn/s average)",
             nodes,
             time,
-            nodes as f64 / time.as_secs_f64() / 1000.0
+            nodes as f64 / time.as_secs_f64() / 1000.0,
+            data.0 as f64 / data.1.as_secs_f64() / 1000.0
         )
         .unwrap();
     }

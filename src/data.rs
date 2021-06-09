@@ -83,6 +83,15 @@ impl Rotation {
         }
     }
 
+    const fn rotate_cells(self, cells: [(i8, i8); 4]) -> [(i8, i8); 4] {
+        [
+            self.rotate_cell(cells[0]),
+            self.rotate_cell(cells[1]),
+            self.rotate_cell(cells[2]),
+            self.rotate_cell(cells[3]),
+        ]
+    }
+
     pub const fn cw(self) -> Self {
         match self {
             Rotation::North => Rotation::East,
@@ -113,17 +122,50 @@ impl Rotation {
 
 impl PieceLocation {
     pub const fn cells(&self) -> [(i8, i8); 4] {
-        let cells = self.piece.cells();
-        [
-            self.translate(self.rotation.rotate_cell(cells[0])),
-            self.translate(self.rotation.rotate_cell(cells[1])),
-            self.translate(self.rotation.rotate_cell(cells[2])),
-            self.translate(self.rotation.rotate_cell(cells[3])),
-        ]
+        const LUT: [[(i8, i8); 4]; 28] = [
+            Rotation::North.rotate_cells(Piece::I.cells()),
+            Rotation::West.rotate_cells(Piece::I.cells()),
+            Rotation::South.rotate_cells(Piece::I.cells()),
+            Rotation::East.rotate_cells(Piece::I.cells()),
+            Rotation::North.rotate_cells(Piece::O.cells()),
+            Rotation::West.rotate_cells(Piece::O.cells()),
+            Rotation::South.rotate_cells(Piece::O.cells()),
+            Rotation::East.rotate_cells(Piece::O.cells()),
+            Rotation::North.rotate_cells(Piece::T.cells()),
+            Rotation::West.rotate_cells(Piece::T.cells()),
+            Rotation::South.rotate_cells(Piece::T.cells()),
+            Rotation::East.rotate_cells(Piece::T.cells()),
+            Rotation::North.rotate_cells(Piece::L.cells()),
+            Rotation::West.rotate_cells(Piece::L.cells()),
+            Rotation::South.rotate_cells(Piece::L.cells()),
+            Rotation::East.rotate_cells(Piece::L.cells()),
+            Rotation::North.rotate_cells(Piece::J.cells()),
+            Rotation::West.rotate_cells(Piece::J.cells()),
+            Rotation::South.rotate_cells(Piece::J.cells()),
+            Rotation::East.rotate_cells(Piece::J.cells()),
+            Rotation::North.rotate_cells(Piece::S.cells()),
+            Rotation::West.rotate_cells(Piece::S.cells()),
+            Rotation::South.rotate_cells(Piece::S.cells()),
+            Rotation::East.rotate_cells(Piece::S.cells()),
+            Rotation::North.rotate_cells(Piece::Z.cells()),
+            Rotation::West.rotate_cells(Piece::Z.cells()),
+            Rotation::South.rotate_cells(Piece::Z.cells()),
+            Rotation::East.rotate_cells(Piece::Z.cells()),
+        ];
+        self.translate_cells(LUT[self.piece as usize * 4 + self.rotation as usize])
     }
 
     const fn translate(&self, (x, y): (i8, i8)) -> (i8, i8) {
         (x + self.x, y + self.y)
+    }
+
+    const fn translate_cells(&self, cells: [(i8, i8); 4]) -> [(i8, i8); 4] {
+        [
+            self.translate(cells[0]),
+            self.translate(cells[1]),
+            self.translate(cells[2]),
+            self.translate(cells[3]),
+        ]
     }
 
     pub fn obstructed(&self, board: &Board) -> bool {
