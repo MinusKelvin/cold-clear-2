@@ -39,6 +39,7 @@ impl<V, S: Default> Default for StateMap<V, S> {
 
 impl<V, S: BuildHasher> StateMap<V, S> {
     pub fn index(&self, k: &GameState) -> u64 {
+        let _scope = ProfileScope::new("hashing");
         let mut hasher = self.hasher.build_hasher();
         k.hash(&mut hasher);
         hasher.finish()

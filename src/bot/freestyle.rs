@@ -42,6 +42,8 @@ impl Mode for Freestyle {
 
     fn do_work(&self) {
         if let Some(node) = self.dag.select() {
+            let _scope = ProfileScope::new("process node");
+
             let (state, next) = node.state();
             let next_possibilities = next.map(EnumSet::only).unwrap_or(state.bag);
 

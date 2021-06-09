@@ -103,11 +103,12 @@ pub fn profiling_frame_end(nodes: u64, time: Duration) {
     for (name, data) in data {
         writeln!(
             report,
-            "{name:20} {spent:.2?} ({percent:.2}%) invocations: {invocations}   avg: {avg:.2?}",
+            "{name:20} {spent:.2?} ({percent:.2}%) ({self:.2}% self) i: {invocations} avg: {avg:.2?}",
             name = name,
             spent = data.self_time,
             invocations = data.invocations,
             percent = data.self_time.as_secs_f64() / total_time.as_secs_f64() * 100.0,
+            self = data.self_time.as_secs_f64() / data.total_time.as_secs_f64() * 100.0,
             avg = data.total_time / data.invocations
         )
         .unwrap();

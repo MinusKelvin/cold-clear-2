@@ -9,6 +9,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
 
     let mut queue = BinaryHeap::with_capacity(64);
     let mut values = HashMap::with_capacity(64);
+    let mut locks = HashMap::with_capacity(64);
 
     let fast_mode;
     if board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16) {
@@ -29,12 +30,24 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                 if location.obstructed(board) {
                     continue;
                 }
+                let distance = location.drop_distance(board);
+                location.y -= distance;
                 let mv = Placement {
                     location,
                     spin: Spin::None,
                 };
-                queue.push(Intermediate { mv, soft_drops: 0 });
-                values.insert(mv, 0);
+                queue.push(Intermediate {
+                    mv,
+                    soft_drops: distance as u32,
+                });
+                values.insert(mv, distance as u32);
+                locks.insert(
+                    Placement {
+                        location: mv.location.canonical_form(),
+                        ..mv
+                    },
+                    0,
+                );
             }
         }
     } else {
@@ -63,8 +76,6 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
         values.insert(spawned, 0);
     }
 
-    let mut locks = HashMap::new();
-
     while let Some(expand) = queue.pop() {
         if expand.soft_drops != values.get(&expand.mv).copied().unwrap_or(40) {
             continue;
@@ -91,8 +102,8 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             .or_insert(expand.soft_drops);
         *sds = expand.soft_drops.min(*sds);
 
-        let mut update_position = |skip_above_stack: bool, target: Placement, soft_drops: u32| {
-            if skip_above_stack && target.location.above_stack(&board) {
+        let mut update_position = |target: Placement, soft_drops: u32| {
+            if fast_mode && target.location.above_stack(&board) {
                 return;
             }
             let prev_sds = values.entry(target).or_insert(40);
@@ -105,19 +116,19 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             }
         };
 
-        update_position(false, dropped, expand.soft_drops + drop_dist as u32);
+        update_position(dropped, expand.soft_drops + drop_dist as u32);
 
         if let Some(mv) = shift(expand.mv.location, board, -1) {
-            update_position(fast_mode, mv, expand.soft_drops);
+            update_position(mv, expand.soft_drops);
         }
         if let Some(mv) = shift(expand.mv.location, board, 1) {
-            update_position(fast_mode, mv, expand.soft_drops);
+            update_position(mv, expand.soft_drops);
         }
         if let Some(mv) = rotate_cw(expand.mv.location, board) {
-            update_position(fast_mode, mv, expand.soft_drops);
+            update_position(mv, expand.soft_drops);
         }
         if let Some(mv) = rotate_ccw(expand.mv.location, board) {
-            update_position(fast_mode, mv, expand.soft_drops);
+            update_position(mv, expand.soft_drops);
         }
     }
 
