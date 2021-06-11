@@ -304,7 +304,7 @@ impl GameState {
     }
 }
 
-#[cfg(all(target_arch = "x86_64", target_feature = "bmi2"))]
+#[cfg(all(target_arch = "x86_64", target_feature = "bmi2", feature = "bmi2"))]
 fn clear_lines(col: &mut u64, lines: u64) {
     *col = unsafe {
         // SAFETY: #[cfg()] guard ensures that this instruction exists at compile time
@@ -312,7 +312,7 @@ fn clear_lines(col: &mut u64, lines: u64) {
     };
 }
 
-#[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2")))]
+#[cfg(not(all(target_arch = "x86_64", target_feature = "bmi2", feature = "bmi2")))]
 fn clear_lines(col: &mut u64, mut lines: u64) {
     while lines != 0 {
         let i = lines.trailing_zeros();

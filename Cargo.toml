@@ -12,6 +12,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 profile = []
+bmi2 = []
 
 [dependencies]
 ahash = "0.7.4"
