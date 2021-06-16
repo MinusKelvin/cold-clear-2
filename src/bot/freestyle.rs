@@ -4,22 +4,18 @@ use enum_map::EnumMap;
 use enumset::EnumSet;
 use ordered_float::OrderedFloat;
 
-use crate::dag::ChildData;
-use crate::dag::Dag;
-use crate::dag::Evaluation;
+use super::{BotOptions, Mode, ModeSwitch};
+use crate::dag::{ChildData, Dag, Evaluation};
 use crate::data::*;
 use crate::movegen::find_moves;
 use crate::profile::ProfileScope;
-
-use super::Mode;
-use super::ModeSwitch;
 
 pub struct Freestyle {
     dag: Dag<Eval>,
 }
 
 impl Freestyle {
-    pub fn new(root: GameState, queue: &[Piece]) -> Self {
+    pub fn new(_options: &BotOptions, root: GameState, queue: &[Piece]) -> Self {
         Freestyle {
             dag: Dag::new(root, queue),
         }
@@ -27,21 +23,21 @@ impl Freestyle {
 }
 
 impl Mode for Freestyle {
-    fn advance(&mut self, mv: Placement) -> Option<ModeSwitch> {
+    fn advance(&mut self, _options: &BotOptions, mv: Placement) -> Option<ModeSwitch> {
         self.dag.advance(mv);
         None
     }
 
-    fn new_piece(&mut self, piece: Piece) {
+    fn new_piece(&mut self, _options: &BotOptions, piece: Piece) {
         self.dag.add_piece(piece);
     }
 
-    fn suggest(&self) -> Vec<Placement> {
+    fn suggest(&self, _options: &BotOptions) -> Vec<Placement> {
         self.dag.suggest()
     }
 
-    fn do_work(&self) {
-        if let Some(node) = self.dag.select() {
+    fn do_work(&self, options: &BotOptions) {
+        if let Some(node) = self.dag.select(options.speculate) {
             let _scope = ProfileScope::new("process node");
 
             let (state, next) = node.state();

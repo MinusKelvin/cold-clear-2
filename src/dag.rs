@@ -158,7 +158,7 @@ impl<E: Evaluation> Dag<E> {
         candidates.into_iter().map(|c| c.mv).collect()
     }
 
-    pub fn select(&self) -> Option<Selection<E>> {
+    pub fn select(&self, speculate: bool) -> Option<Selection<E>> {
         let _scope = ProfileScope::new("select");
 
         let mut layers = vec![&*self.top_layer];
@@ -185,8 +185,14 @@ impl<E: Evaluation> Dag<E> {
                 Some(children) => children,
             };
 
-            // TODO: draw from bag
-            let next = layer.piece?;
+            if !speculate && layer.next_layer.piece.is_none() {
+                return None;
+            }
+
+            let next = layer.piece.unwrap_or_else(|| {
+                let i = thread_rng().gen_range(0..game_state.bag.len());
+                game_state.bag.iter().nth(i).unwrap()
+            });
 
             if children[next].is_empty() {
                 return None;
