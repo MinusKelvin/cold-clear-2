@@ -4,11 +4,8 @@ use std::collections::BinaryHeap;
 use ahash::AHashMap;
 
 use crate::data::*;
-use crate::profile::ProfileScope;
 
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
-    let _scope = ProfileScope::new("movegen");
-
     let mut queue = BinaryHeap::with_capacity(64);
     let mut values = AHashMap::with_capacity(64);
     let mut locks = AHashMap::with_capacity(64);

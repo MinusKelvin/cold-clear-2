@@ -23,23 +23,6 @@ pub async fn run(
     mut incoming: impl Stream<Item = FrontendMessage> + Unpin,
     mut outgoing: impl Sink<BotMessage, Error = Infallible> + Unpin,
 ) {
-    std::panic::set_hook(Box::new(|info| {
-        use std::io::Write;
-        let report = std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open("profile.txt")
-            .unwrap();
-        let mut report = std::io::BufWriter::new(report);
-        if let Some(msg) = info.payload().downcast_ref::<&str>() {
-            writeln!(report, "{}", msg).unwrap();
-        } else if let Some(msg) = info.payload().downcast_ref::<String>() {
-            writeln!(report, "{}", msg).unwrap();
-        } else {
-            writeln!(report, "Unknown panic payload type").unwrap();
-        }
-    }));
-
     outgoing
         .send(BotMessage::Info {
             name: "Cold Clear 2".to_owned(),
@@ -52,7 +35,6 @@ pub async fn run(
 
     let bot = Arc::new(SharedState::<Bot>::new());
 
-    profile::setup_thread();
     spawn_workers(&bot);
 
     let mut waiting_on_first_piece = None;
@@ -157,59 +139,8 @@ fn create_bot(start_msg: FrontendMessage) -> Bot {
 fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
     for _ in 0..1 {
         let bot = bot.clone();
-        std::thread::spawn(move || {
-            profile::setup_thread();
-            loop {
-                bot.read_op(|bot| bot.do_work());
-            }
+        std::thread::spawn(move || loop {
+            bot.read_op(|bot| bot.do_work());
         });
-    }
-}
-
-#[cfg(feature = "profile")]
-mod profile;
-
-#[cfg(not(feature = "profile"))]
-mod profile {
-    use std::io::Write;
-
-    pub struct ProfileScope {
-        _priv: (),
-    }
-
-    impl ProfileScope {
-        pub fn new(_name: &'static str) -> Self {
-            ProfileScope { _priv: () }
-        }
-    }
-
-    impl Drop for ProfileScope {
-        fn drop(&mut self) {}
-    }
-
-    pub fn setup_thread() {}
-
-    static TOTALS: once_cell::sync::Lazy<parking_lot::Mutex<(u64, std::time::Duration)>> =
-        once_cell::sync::Lazy::new(Default::default);
-
-    pub fn profiling_frame_end(nodes: u64, time: std::time::Duration) {
-        let report = std::fs::OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open("profile.txt")
-            .unwrap();
-        let mut report = std::io::BufWriter::new(report);
-        let mut data = TOTALS.lock();
-        data.0 += nodes;
-        data.1 += time;
-        writeln!(
-            report,
-            "{} nodes in {:.2?} ({:.1} kn/s, {:.1} kn/s average)",
-            nodes,
-            time,
-            nodes as f64 / time.as_secs_f64() / 1000.0,
-            data.0 as f64 / data.1.as_secs_f64() / 1000.0
-        )
-        .unwrap();
     }
 }

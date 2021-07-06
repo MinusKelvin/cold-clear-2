@@ -12,8 +12,6 @@ use smallvec::SmallVec;
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
 use crate::map::StateMap;
-use crate::profile::profiling_frame_end;
-use crate::profile::ProfileScope;
 
 pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
     type Reward: Copy;
@@ -96,11 +94,6 @@ impl<E: Evaluation> Dag<E> {
 
     pub fn advance(&mut self, mv: Placement) {
         let now = Instant::now();
-        profiling_frame_end(
-            *self.new_nodes.get_mut(),
-            now.duration_since(self.last_advance),
-        );
-        let _scope = ProfileScope::new("advance");
         self.last_advance = now;
         *self.new_nodes.get_mut() = 0;
 
@@ -159,8 +152,6 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn select(&self, speculate: bool) -> Option<Selection<E>> {
-        let _scope = ProfileScope::new("select");
-
         let mut layers = vec![&*self.top_layer];
         let mut game_state = self.root;
         loop {
@@ -232,8 +223,6 @@ fn expand<E: Evaluation>(
     parent_state: GameState,
     children: EnumMap<Piece, Vec<ChildData<E>>>,
 ) -> Vec<(u64, Placement, Piece, u64)> {
-    let _scope = ProfileScope::new("expand");
-
     let mut childs = EnumMap::<_, Vec<_>>::default();
 
     // We need to acquire the lock on the parent since the backprop routine needs the children
@@ -300,8 +289,6 @@ fn backprop<'a, E: Evaluation>(
     mut layers: Vec<&'a Layer<E>>,
     mut next: Vec<(u64, Placement, Piece, u64)>,
 ) {
-    let _scope = ProfileScope::new("backprop");
-
     while let Some(layer) = layers.pop() {
         let mut next_up = vec![];
 

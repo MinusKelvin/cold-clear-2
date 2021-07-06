@@ -11,7 +11,6 @@ use parking_lot::RwLockReadGuard;
 use parking_lot::RwLockWriteGuard;
 
 use crate::data::GameState;
-use crate::profile::ProfileScope;
 
 pub struct StateMap<V, S = ahash::RandomState> {
     hasher: S,
@@ -38,7 +37,6 @@ impl<V, S: Default> Default for StateMap<V, S> {
 
 impl<V, S: BuildHasher> StateMap<V, S> {
     pub fn index(&self, k: &GameState) -> u64 {
-        let _scope = ProfileScope::new("hashing");
         let mut hasher = self.hasher.build_hasher();
         k.hash(&mut hasher);
         hasher.finish()
@@ -49,7 +47,7 @@ impl<V, S: BuildHasher> StateMap<V, S> {
     }
 
     pub fn get_raw(&self, k: u64) -> Option<MappedRwLockReadGuard<V>> {
-        RwLockReadGuard::try_map(profile_read(self.bucket(k)), |shard| shard.get(&k)).ok()
+        RwLockReadGuard::try_map(self.bucket(k).read(), |shard| shard.get(&k)).ok()
     }
 
     pub fn get(&self, k: &GameState) -> Option<MappedRwLockReadGuard<V>> {
@@ -57,7 +55,7 @@ impl<V, S: BuildHasher> StateMap<V, S> {
     }
 
     pub fn get_raw_mut(&self, k: u64) -> Option<MappedRwLockWriteGuard<V>> {
-        RwLockWriteGuard::try_map(profile_write(self.bucket(k)), |shard| shard.get_mut(&k)).ok()
+        RwLockWriteGuard::try_map(self.bucket(k).write(), |shard| shard.get_mut(&k)).ok()
     }
 
     pub fn get_mut(&self, k: &GameState) -> Option<MappedRwLockWriteGuard<V>> {
@@ -66,7 +64,7 @@ impl<V, S: BuildHasher> StateMap<V, S> {
 
     pub fn insert(&self, k: &GameState, v: V) {
         let i = self.index(k);
-        profile_write(self.bucket(i)).insert(i, v);
+        self.bucket(i).write().insert(i, v);
     }
 
     pub fn get_raw_or_insert_with(
@@ -74,7 +72,7 @@ impl<V, S: BuildHasher> StateMap<V, S> {
         k: u64,
         f: impl FnOnce() -> V,
     ) -> MappedRwLockWriteGuard<V> {
-        RwLockWriteGuard::map(profile_write(self.bucket(k)), |shard| {
+        RwLockWriteGuard::map(self.bucket(k).write(), |shard| {
             if !shard.contains_key(&k) {
                 shard.insert(k, f());
             }
@@ -89,20 +87,4 @@ impl<V, S: BuildHasher> StateMap<V, S> {
     ) -> MappedRwLockWriteGuard<V> {
         self.get_raw_or_insert_with(self.index(k), f)
     }
-}
-
-fn profile_read<T>(lock: &RwLock<T>) -> RwLockReadGuard<T> {
-    if let Some(guard) = lock.try_read() {
-        return guard;
-    }
-    let _scope = ProfileScope::new("map read contention");
-    lock.read()
-}
-
-fn profile_write<T>(lock: &RwLock<T>) -> RwLockWriteGuard<T> {
-    if let Some(guard) = lock.try_write() {
-        return guard;
-    }
-    let _scope = ProfileScope::new("map write contention");
-    lock.write()
 }

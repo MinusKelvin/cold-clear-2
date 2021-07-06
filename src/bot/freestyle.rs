@@ -8,7 +8,6 @@ use super::{BotOptions, Mode, ModeSwitch};
 use crate::dag::{ChildData, Dag, Evaluation};
 use crate::data::*;
 use crate::movegen::find_moves;
-use crate::profile::ProfileScope;
 
 pub struct Freestyle {
     dag: Dag<Eval>,
@@ -38,8 +37,6 @@ impl Mode for Freestyle {
 
     fn do_work(&self, options: &BotOptions) {
         if let Some(node) = self.dag.select(options.speculate) {
-            let _scope = ProfileScope::new("process node");
-
             let (state, next) = node.state();
             let next_possibilities = next.map(EnumSet::only).unwrap_or(state.bag);
 
@@ -130,8 +127,6 @@ fn evaluate(
     info: &PlacementInfo,
     softdrop: u32,
 ) -> (Eval, Reward) {
-    let _scope = ProfileScope::new("freestyle eval");
-
     let mut eval = 0.0;
     let mut reward = 0.0;
 
