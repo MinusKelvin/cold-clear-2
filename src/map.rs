@@ -18,7 +18,7 @@ pub struct StateMap<V, S = ahash::RandomState> {
 }
 
 const SHARD_INDEX_BITS: usize = 12;
-const SHARD_INDEX_SHIFT: usize = 64 - 12;
+const SHARD_INDEX_SHIFT: usize = 32;
 const SHARDS: usize = 1 << SHARD_INDEX_BITS;
 
 impl<V, S: Default> Default for StateMap<V, S> {
@@ -43,7 +43,7 @@ impl<V, S: BuildHasher> StateMap<V, S> {
     }
 
     fn bucket(&self, k: u64) -> &RwLock<IntMap<u64, V>> {
-        &self.buckets[(k >> SHARD_INDEX_SHIFT) as usize]
+        &self.buckets[(k >> SHARD_INDEX_SHIFT) as usize % SHARDS]
     }
 
     pub fn get_raw(&self, k: u64) -> Option<MappedRwLockReadGuard<V>> {
