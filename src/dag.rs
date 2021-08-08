@@ -94,27 +94,38 @@ impl<E: Evaluation> Dag<E> {
 
     pub fn advance(&mut self, mv: Placement) {
         let now = Instant::now();
+        let nodes = *self.new_nodes.get_mut();
+        let d = now - self.last_advance;
+        eprintln!(
+            "{} nodes in {:.2?} ({:.1} kn/s)",
+            nodes,
+            d,
+            nodes as f64 / d.as_secs_f64() / 1000.0
+        );
         self.last_advance = now;
         *self.new_nodes.get_mut() = 0;
 
-        let top_layer = std::mem::take(&mut *self.top_layer);
-        self.root.advance(
-            top_layer.piece.expect("cannot advance without next piece"),
-            mv,
-        );
-        Lazy::force(&top_layer.next_layer);
-        self.top_layer = Lazy::into_value(top_layer.next_layer).unwrap();
-        let _ = self
-            .top_layer
-            .states
-            .get_or_insert_with(&self.root, || Node {
-                parents: SmallVec::new(),
-                eval: E::default(),
-                children: None,
-                expanding: AtomicBool::new(false),
-                bag: self.root.bag,
-                reserve: self.root.reserve,
-            });
+        {
+            let top_layer = std::mem::take(&mut *self.top_layer);
+            self.root.advance(
+                top_layer.piece.expect("cannot advance without next piece"),
+                mv,
+            );
+            Lazy::force(&top_layer.next_layer);
+            self.top_layer = Lazy::into_value(top_layer.next_layer).unwrap();
+            let _ = self
+                .top_layer
+                .states
+                .get_or_insert_with(&self.root, || Node {
+                    parents: SmallVec::new(),
+                    eval: E::default(),
+                    children: None,
+                    expanding: AtomicBool::new(false),
+                    bag: self.root.bag,
+                    reserve: self.root.reserve,
+                });
+        }
+        eprintln!("Took {:.2?} to advance state", now.elapsed());
     }
 
     pub fn add_piece(&mut self, piece: Piece) {
