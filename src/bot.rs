@@ -30,7 +30,7 @@ trait Mode {
     fn advance(&mut self, options: &BotOptions, mv: Placement) -> Option<ModeSwitch>;
     fn new_piece(&mut self, options: &BotOptions, piece: Piece);
     fn suggest(&self, options: &BotOptions) -> Vec<Placement>;
-    fn do_work(&self, options: &BotOptions);
+    fn do_work(&self, options: &BotOptions) -> Statistics;
 }
 
 enum ModeSwitch {
@@ -63,8 +63,8 @@ impl Bot {
         self.mode.suggest(&self.options)
     }
 
-    pub fn do_work(&self) {
-        self.mode.do_work(&self.options);
+    pub fn do_work(&self) -> Statistics {
+        self.mode.do_work(&self.options)
     }
 
     fn switch(&mut self, to: ModeSwitch) {
@@ -74,5 +74,30 @@ impl Bot {
                     Freestyle::new(&self.options, self.current, self.queue.make_contiguous()).into()
             }
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct Statistics {
+    pub nodes: u64,
+    pub selections: u64,
+    pub expansions: u64,
+}
+
+impl Default for Statistics {
+    fn default() -> Self {
+        Statistics {
+            nodes: 0,
+            selections: 0,
+            expansions: 0,
+        }
+    }
+}
+
+impl Statistics {
+    pub fn accumulate(&mut self, other: Self) {
+        self.nodes += other.nodes;
+        self.selections += other.selections;
+        self.expansions += other.expansions;
     }
 }

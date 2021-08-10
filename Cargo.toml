@@ -31,5 +31,6 @@ smallvec = { version = "1.6.1", features = ["union"] }
 git = "https://github.com/tetris-bot-protocol/tbp-rs"
 branch = "main"
 features = [
-    "randomizer"
+    "randomizer",
+    "move_info",
 ]

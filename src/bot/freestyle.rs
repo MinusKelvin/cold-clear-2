@@ -4,7 +4,7 @@ use enum_map::EnumMap;
 use enumset::EnumSet;
 use ordered_float::OrderedFloat;
 
-use super::{BotOptions, Mode, ModeSwitch};
+use super::{BotOptions, Mode, ModeSwitch, Statistics};
 use crate::dag::{ChildData, Dag, Evaluation};
 use crate::data::*;
 use crate::movegen::find_moves;
@@ -35,7 +35,10 @@ impl Mode for Freestyle {
         self.dag.suggest()
     }
 
-    fn do_work(&self, options: &BotOptions) {
+    fn do_work(&self, options: &BotOptions) -> Statistics {
+        let mut new_stats = Statistics::default();
+        new_stats.selections += 1;
+
         if let Some(node) = self.dag.select(options.speculate) {
             let (state, next) = node.state();
             let next_possibilities = next.map(EnumSet::only).unwrap_or(state.bag);
@@ -66,10 +69,15 @@ impl Mode for Freestyle {
                         reward,
                     });
                 }
+
+                new_stats.nodes += children[next].len() as u64;
             }
 
+            new_stats.expansions += 1;
             node.expand(children);
         }
+
+        new_stats
     }
 }
 

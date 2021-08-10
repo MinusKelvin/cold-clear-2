@@ -9,7 +9,7 @@ use tbp::{BotMessage, FrontendMessage};
 
 use crate::bot::Bot;
 use crate::data::{GameState, Piece};
-use crate::sharing::SharedState;
+use crate::sync::BotSyncronizer;
 
 mod bot;
 mod convert;
@@ -17,7 +17,7 @@ mod dag;
 mod data;
 mod map;
 mod movegen;
-mod sharing;
+mod sync;
 
 pub async fn run(
     mut incoming: impl Stream<Item = FrontendMessage> + Unpin,
@@ -33,7 +33,7 @@ pub async fn run(
         .await
         .unwrap();
 
-    let bot = Arc::new(SharedState::<Bot>::new());
+    let bot = Arc::new(BotSyncronizer::new());
 
     spawn_workers(&bot);
 
@@ -55,17 +55,18 @@ pub async fn run(
                 waiting_on_first_piece = None;
             }
             FrontendMessage::Suggest => {
-                if let Some(results) = bot.read_op_if_exists(|state| state.suggest()) {
+                if let Some((results, move_info)) = bot.suggest() {
                     outgoing
                         .send(BotMessage::Suggestion {
                             moves: results.into_iter().map(Into::into).collect(),
+                            move_info,
                         })
                         .await
                         .unwrap();
                 }
             }
             FrontendMessage::Play { mv } => {
-                bot.write_op_if_exists(|state| state.advance(mv.into()));
+                bot.advance(mv.into());
             }
             FrontendMessage::NewPiece { piece } => {
                 if let Some(mut msg) = waiting_on_first_piece.take() {
@@ -76,8 +77,7 @@ pub async fn run(
                         unreachable!()
                     }
                 } else {
-                    let piece = piece.into();
-                    bot.write_op_if_exists(|state| state.new_piece(piece));
+                    bot.new_piece(piece.into());
                 }
             }
             FrontendMessage::Rules { randomizer: _ } => {
@@ -136,11 +136,9 @@ fn create_bot(start_msg: FrontendMessage) -> Bot {
     }
 }
 
-fn spawn_workers(bot: &Arc<SharedState<Bot>>) {
-    for _ in 0..1 {
+fn spawn_workers(bot: &Arc<BotSyncronizer>) {
+    for _ in 0..16 {
         let bot = bot.clone();
-        std::thread::spawn(move || loop {
-            bot.read_op(|bot| bot.do_work());
-        });
+        std::thread::spawn(move || bot.work_loop());
     }
 }

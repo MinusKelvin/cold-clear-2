@@ -1,0 +1,111 @@
+use std::time::Instant;
+
+use parking_lot::{Condvar, Mutex, RwLock};
+use tbp::move_info::MoveInfo;
+
+use crate::bot::{Bot, Statistics};
+use crate::data::{Piece, Placement};
+
+pub struct BotSyncronizer {
+    state: Mutex<State>,
+    blocker: Condvar,
+    bot: RwLock<Option<Bot>>,
+}
+
+impl BotSyncronizer {
+    pub fn new() -> Self {
+        BotSyncronizer {
+            state: Mutex::new(State {
+                stats: Default::default(),
+                last_advance: Instant::now(),
+                node_limit: u64::MAX,
+            }),
+            blocker: Condvar::new(),
+            bot: RwLock::new(None),
+        }
+    }
+
+    pub fn start(&self, initial_state: Bot) {
+        let mut state = self.state.lock();
+        state.stats = Default::default();
+        *self.bot.write() = Some(initial_state);
+        self.blocker.notify_all();
+    }
+
+    pub fn stop(&self) {
+        *self.bot.write() = None;
+    }
+
+    pub fn suggest(&self) -> Option<(Vec<Placement>, MoveInfo)> {
+        let bot = self.bot.read();
+        bot.as_ref().map(|bot| {
+            let state = self.state.lock();
+            (
+                bot.suggest(),
+                MoveInfo {
+                    nodes: Some(state.stats.nodes as f64),
+                    nps: Some(
+                        state.stats.nodes as f64 / state.last_advance.elapsed().as_secs_f64(),
+                    ),
+                    depth: None,
+                    extra: Some(format!(
+                        "{:.1}% of selections expanded",
+                        state.stats.expansions as f64 / state.stats.selections as f64 * 100.0
+                    )),
+                },
+            )
+        })
+    }
+
+    pub fn advance(&self, mv: Placement) {
+        let mut state = self.state.lock();
+        state.stats = Default::default();
+        state.last_advance = Instant::now();
+        let mut bot = self.bot.write();
+        if let Some(bot) = &mut *bot {
+            bot.advance(mv);
+        }
+        self.blocker.notify_all();
+    }
+
+    pub fn new_piece(&self, piece: Piece) {
+        let mut bot = self.bot.write();
+        if let Some(bot) = &mut *bot {
+            bot.new_piece(piece);
+        }
+        self.blocker.notify_all();
+    }
+
+    pub fn work_loop(&self) {
+        let mut state = self.state.lock();
+        loop {
+            if state.stats.nodes > state.node_limit {
+                self.blocker.wait(&mut state);
+                continue;
+            }
+            let bot_guard = self.bot.read();
+            let bot = match &*bot_guard {
+                Some(bot) => bot,
+                None => {
+                    drop(bot_guard);
+                    self.blocker.wait(&mut state);
+                    continue;
+                }
+            };
+
+            drop(state);
+            let new_stats = bot.do_work();
+            drop(bot_guard);
+
+            state = self.state.lock();
+            state.stats.accumulate(new_stats);
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+struct State {
+    stats: Statistics,
+    last_advance: Instant,
+    node_limit: u64,
+}

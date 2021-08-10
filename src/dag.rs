@@ -1,7 +1,5 @@
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::AtomicU64;
 use std::sync::atomic::{self};
-use std::time::Instant;
 
 use enum_map::EnumMap;
 use enumset::EnumSet;
@@ -22,14 +20,11 @@ pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output 
 pub struct Dag<E: Evaluation> {
     root: GameState,
     top_layer: Box<Layer<E>>,
-    last_advance: Instant,
-    new_nodes: AtomicU64,
 }
 
 pub struct Selection<'a, E: Evaluation> {
     layers: Vec<&'a Layer<E>>,
     game_state: GameState,
-    new_nodes: &'a AtomicU64,
 }
 
 pub struct ChildData<E: Evaluation> {
@@ -87,45 +82,28 @@ impl<E: Evaluation> Dag<E> {
         Dag {
             root,
             top_layer: Box::new(top_layer),
-            last_advance: Instant::now(),
-            new_nodes: AtomicU64::new(0),
         }
     }
 
     pub fn advance(&mut self, mv: Placement) {
-        let now = Instant::now();
-        let nodes = *self.new_nodes.get_mut();
-        let d = now - self.last_advance;
-        eprintln!(
-            "{} nodes in {:.2?} ({:.1} kn/s)",
-            nodes,
-            d,
-            nodes as f64 / d.as_secs_f64() / 1000.0
+        let top_layer = std::mem::take(&mut *self.top_layer);
+        self.root.advance(
+            top_layer.piece.expect("cannot advance without next piece"),
+            mv,
         );
-        self.last_advance = now;
-        *self.new_nodes.get_mut() = 0;
-
-        {
-            let top_layer = std::mem::take(&mut *self.top_layer);
-            self.root.advance(
-                top_layer.piece.expect("cannot advance without next piece"),
-                mv,
-            );
-            Lazy::force(&top_layer.next_layer);
-            self.top_layer = Lazy::into_value(top_layer.next_layer).unwrap();
-            let _ = self
-                .top_layer
-                .states
-                .get_or_insert_with(&self.root, || Node {
-                    parents: SmallVec::new(),
-                    eval: E::default(),
-                    children: None,
-                    expanding: AtomicBool::new(false),
-                    bag: self.root.bag,
-                    reserve: self.root.reserve,
-                });
-        }
-        eprintln!("Took {:.2?} to advance state", now.elapsed());
+        Lazy::force(&top_layer.next_layer);
+        self.top_layer = Lazy::into_value(top_layer.next_layer).unwrap();
+        let _ = self
+            .top_layer
+            .states
+            .get_or_insert_with(&self.root, || Node {
+                parents: SmallVec::new(),
+                eval: E::default(),
+                children: None,
+                expanding: AtomicBool::new(false),
+                bag: self.root.bag,
+                reserve: self.root.reserve,
+            });
     }
 
     pub fn add_piece(&mut self, piece: Piece) {
@@ -177,11 +155,7 @@ impl<E: Evaluation> Dag<E> {
                     if node.expanding.swap(true, atomic::Ordering::Acquire) {
                         return None;
                     } else {
-                        return Some(Selection {
-                            layers,
-                            game_state,
-                            new_nodes: &self.new_nodes,
-                        });
+                        return Some(Selection { layers, game_state });
                     }
                 }
                 Some(children) => children,
@@ -223,14 +197,13 @@ impl<E: Evaluation> Selection<'_, E> {
     pub fn expand(self, children: EnumMap<Piece, Vec<ChildData<E>>>) {
         let mut layers = self.layers;
         let start_layer = layers.pop().unwrap();
-        let next = expand(start_layer, self.new_nodes, self.game_state, children);
+        let next = expand(start_layer, self.game_state, children);
         backprop(start_layer, layers, next);
     }
 }
 
 fn expand<E: Evaluation>(
     layer: &Layer<E>,
-    new_nodes: &AtomicU64,
     parent_state: GameState,
     children: EnumMap<Piece, Vec<ChildData<E>>>,
 ) -> Vec<(u64, Placement, Piece, u64)> {
@@ -261,10 +234,6 @@ fn expand<E: Evaluation>(
             reward: child.reward,
         });
     }
-    new_nodes.fetch_add(
-        childs.values().map(|l| l.len() as u64).sum(),
-        atomic::Ordering::Relaxed,
-    );
 
     for list in childs.values_mut() {
         list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
