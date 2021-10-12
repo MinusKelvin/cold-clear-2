@@ -242,7 +242,9 @@ impl<E: Evaluation> LayerKind<E> {
             states: old.states.map_values(|node| known::Node {
                 parents: node.parents,
                 eval: node.eval,
-                children: node.children.map(|mut v| std::mem::take(&mut v[piece])),
+                children: node
+                    .children
+                    .map(|v| v[piece].to_owned().into_boxed_slice()),
                 expanding: node.expanding,
             }),
             piece,

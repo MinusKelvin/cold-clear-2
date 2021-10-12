@@ -1,3 +1,4 @@
+use std::ops::{Index, IndexMut};
 use std::sync::atomic::{self, AtomicBool};
 
 use enum_map::EnumMap;
@@ -20,7 +21,7 @@ pub(super) struct Layer<E: Evaluation> {
 pub(super) struct Node<E: Evaluation> {
     pub parents: SmallVec<[(u64, Placement, Piece); 1]>,
     pub eval: E,
-    pub children: Option<EnumMap<Piece, Box<[Child<E>]>>>,
+    pub children: Option<PackedChildren<E>>,
     pub expanding: AtomicBool,
     // we need this info while backpropagating, but we don't have access to the game state then
     bag: EnumSet<Piece>,
@@ -113,43 +114,45 @@ impl<E: Evaluation> Layer<E> {
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
     ) -> Vec<BackpropUpdate> {
-        let mut childs = EnumMap::<_, Vec<_>>::default();
+        let mut childs_data = vec![];
+        let mut childs_indices = [0; 8];
 
         // We need to acquire the lock on the parent since the backprop routine needs the children
         // lists to exist, and they won't if we're still creating them
         let parent_index = self.states.index(&parent_state);
         let mut parent = self.states.get_raw_mut(parent_index).unwrap();
 
-        for (speculation_piece, child) in children
-            .into_iter()
-            .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
-        {
-            let eval = next_layer
-                .kind
-                .create_node(&child, parent_index, speculation_piece);
-            childs[speculation_piece].push(Child {
-                mv: child.mv,
-                cached_eval: eval + child.reward,
-                reward: child.reward,
-            });
+        for speculation_piece in EnumSet::all() {
+            for child in &children[speculation_piece] {
+                let eval = next_layer
+                    .kind
+                    .create_node(&child, parent_index, speculation_piece);
+                childs_data.push(Child {
+                    mv: child.mv,
+                    cached_eval: eval + child.reward,
+                    reward: child.reward,
+                });
+            }
+            childs_indices[speculation_piece as usize + 1] = childs_data.len() as u16;
         }
 
-        for list in childs.values_mut() {
-            list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
+        let mut children = PackedChildren {
+            data: childs_data.into_boxed_slice(),
+            start_indices: childs_indices,
+        };
+
+        for p in EnumSet::all() {
+            children[p].sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
         }
 
         let next_possibilities = parent.bag;
         parent.eval = E::average(
             next_possibilities
                 .iter()
-                .map(|p| childs[p].first().map(|c| c.cached_eval)),
+                .map(|p| children[p].first().map(|c| c.cached_eval)),
         );
 
-        let mut boxed_slice_childs = EnumMap::default();
-        for (k, v) in childs {
-            boxed_slice_childs[k] = v.into_boxed_slice();
-        }
-        parent.children = Some(boxed_slice_childs);
+        parent.children = Some(children);
 
         let mut next = vec![];
 
@@ -203,5 +206,28 @@ impl<E: Evaluation> Layer<E> {
         }
 
         new_updates
+    }
+}
+
+pub(super) struct PackedChildren<E: Evaluation> {
+    data: Box<[Child<E>]>,
+    start_indices: [u16; 8],
+}
+
+impl<E: Evaluation> Index<Piece> for PackedChildren<E> {
+    type Output = [Child<E>];
+
+    fn index(&self, index: Piece) -> &Self::Output {
+        let start = self.start_indices[index as usize] as usize;
+        let end = self.start_indices[index as usize + 1] as usize;
+        &self.data[start..end]
+    }
+}
+
+impl<E: Evaluation> IndexMut<Piece> for PackedChildren<E> {
+    fn index_mut(&mut self, index: Piece) -> &mut Self::Output {
+        let start = self.start_indices[index as usize] as usize;
+        let end = self.start_indices[index as usize + 1] as usize;
+        &mut self.data[start..end]
     }
 }
