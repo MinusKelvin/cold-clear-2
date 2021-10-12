@@ -1,45 +1,36 @@
 use std::sync::atomic::{self, AtomicBool};
 
 use enum_map::EnumMap;
-use enumset::EnumSet;
 use rand::prelude::*;
 use smallvec::SmallVec;
 
 use crate::data::{GameState, Piece, Placement};
 use crate::map::StateMap;
 
-use super::{update_child, BackpropUpdate, Child, ChildData, Evaluation, Layer, SelectResult};
+use super::{
+    update_child, BackpropUpdate, Child, ChildData, Evaluation, LayerCommon, SelectResult,
+};
 
-#[derive(Default)]
-pub struct Raw<E: Evaluation> {
-    states: StateMap<Node<E>>,
-    piece: Option<Piece>,
+pub(super) struct Layer<E: Evaluation> {
+    pub states: StateMap<Node<E>>,
+    pub piece: Piece,
 }
 
-struct Node<E: Evaluation> {
-    parents: SmallVec<[(u64, Placement, Piece); 1]>,
-    eval: E,
-    children: Option<EnumMap<Piece, Box<[Child<E>]>>>,
-    expanding: AtomicBool,
-    // we need this info while backpropagating, but we don't have access to the game state then
-    bag: EnumSet<Piece>,
-    reserve: Piece,
+pub(super) struct Node<E: Evaluation> {
+    pub parents: SmallVec<[(u64, Placement, Piece); 1]>,
+    pub eval: E,
+    pub children: Option<Box<[Child<E>]>>,
+    pub expanding: AtomicBool,
 }
 
-impl<E: Evaluation> Raw<E> {
+impl<E: Evaluation> Layer<E> {
     pub fn initialize_root(&self, root: &GameState) {
         let _ = self.states.get_or_insert_with(root, || Node {
             parents: SmallVec::new(),
             eval: E::default(),
             children: None,
             expanding: AtomicBool::new(false),
-            bag: root.bag,
-            reserve: root.reserve,
         });
-    }
-
-    pub fn piece(&self) -> Option<Piece> {
-        self.piece
     }
 
     pub fn suggest(&self, state: &GameState) -> Vec<Placement> {
@@ -50,16 +41,7 @@ impl<E: Evaluation> Raw<E> {
         };
 
         let mut candidates: Vec<&_> = vec![];
-        match self.piece {
-            Some(next) => {
-                candidates.extend(children[next].first());
-            }
-            None => {
-                for piece in state.bag {
-                    candidates.extend(children[piece].first());
-                }
-            }
-        };
+        candidates.extend(children.first());
         candidates.sort_by(|a, b| a.cached_eval.partial_cmp(&b.cached_eval).unwrap().reverse());
 
         candidates.into_iter().map(|c| c.mv).collect()
@@ -82,30 +64,17 @@ impl<E: Evaluation> Raw<E> {
             Some(children) => children,
         };
 
-        let next = self.piece.unwrap_or_else(|| {
-            let i = thread_rng().gen_range(0..game_state.bag.len());
-            game_state.bag.iter().nth(i).unwrap()
-        });
-
-        if children[next].is_empty() {
+        if children.is_empty() {
             return SelectResult::Failed;
         }
 
         loop {
             let s: f64 = thread_rng().gen();
             let i = -s.log2() as usize;
-            if i < children[next].len() {
-                break SelectResult::Advance(next, children[next][i].mv);
+            if i < children.len() {
+                break SelectResult::Advance(self.piece, children[i].mv);
             }
         }
-    }
-
-    pub fn despeculate(&mut self, piece: Piece) -> bool {
-        let result = self.piece.is_none();
-        if result {
-            self.piece = Some(piece);
-        }
-        result
     }
 
     pub fn get_eval(&self, raw: u64) -> E {
@@ -120,8 +89,6 @@ impl<E: Evaluation> Raw<E> {
                 eval: child.eval,
                 children: None,
                 expanding: AtomicBool::new(false),
-                bag: child.resulting_state.bag,
-                reserve: child.resulting_state.reserve,
             });
         node.parents.push((parent, child.mv, speculation_piece));
         node.eval
@@ -129,50 +96,30 @@ impl<E: Evaluation> Raw<E> {
 
     pub fn expand(
         &self,
-        next_layer: &Layer<E>,
+        next_layer: &LayerCommon<E>,
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
     ) -> Vec<BackpropUpdate> {
-        let mut childs = EnumMap::<_, Vec<_>>::default();
+        let mut childs = Vec::with_capacity(children[self.piece].len());
 
         // We need to acquire the lock on the parent since the backprop routine needs the children
         // lists to exist, and they won't if we're still creating them
         let parent_index = self.states.index(&parent_state);
         let mut parent = self.states.get_raw_mut(parent_index).unwrap();
 
-        for (speculation_piece, child) in children
-            .into_iter()
-            .flat_map(|(p, children)| children.into_iter().map(move |d| (p, d)))
-        {
-            let eval = next_layer
-                .kind
-                .create_node(&child, parent_index, speculation_piece);
-            childs[speculation_piece].push(Child {
+        for child in &children[self.piece] {
+            let eval = next_layer.kind.create_node(child, parent_index, self.piece);
+            childs.push(Child {
                 mv: child.mv,
                 cached_eval: eval + child.reward,
                 reward: child.reward,
             });
         }
 
-        for list in childs.values_mut() {
-            list.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
-        }
+        childs.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
 
-        let next_possibilities = match self.piece {
-            Some(p) => EnumSet::only(p),
-            None => parent.bag,
-        };
-        parent.eval = E::average(
-            next_possibilities
-                .iter()
-                .map(|p| childs[p].first().map(|c| c.cached_eval)),
-        );
-
-        let mut boxed_slice_childs = EnumMap::default();
-        for (k, v) in childs {
-            boxed_slice_childs[k] = v.into_boxed_slice();
-        }
-        parent.children = Some(boxed_slice_childs);
+        parent.eval = E::average(std::iter::once(childs.first().map(|c| c.cached_eval)));
+        parent.children = Some(childs.into_boxed_slice());
 
         let mut next = vec![];
 
@@ -191,34 +138,24 @@ impl<E: Evaluation> Raw<E> {
     pub fn backprop(
         &self,
         to_update: Vec<BackpropUpdate>,
-        next_layer: &Layer<E>,
+        next_layer: &LayerCommon<E>,
     ) -> Vec<BackpropUpdate> {
         let mut new_updates = vec![];
 
         for update in to_update {
+            if update.speculation_piece != self.piece {
+                continue;
+            }
+
             let mut parent = self.states.get_raw_mut(update.parent).unwrap();
             let child_eval = next_layer.kind.get_eval(update.child);
 
-            let parent_bag = parent.bag;
-            let parent_reserve = parent.reserve;
             let children = parent.children.as_mut().unwrap();
-            let list = &mut children[update.speculation_piece];
 
-            let is_best = update_child(list, update.mv, child_eval);
+            let is_best = update_child(children, update.mv, child_eval);
 
             if is_best {
-                let next_possibilities = match self.piece {
-                    Some(p) => EnumSet::only(p),
-                    None => parent_bag,
-                };
-
-                let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
-
-                let eval = E::average(
-                    next_possibilities
-                        .iter()
-                        .map(|p| best_for(p).max(best_for(parent_reserve))),
-                );
+                let eval = children[0].cached_eval;
 
                 if parent.eval != eval {
                     parent.eval = eval;

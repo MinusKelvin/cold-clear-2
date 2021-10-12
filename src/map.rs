@@ -27,8 +27,7 @@ impl<V, S: Default> Default for StateMap<V, S> {
             hasher: Default::default(),
             buckets: std::iter::repeat_with(|| RwLock::new(IntMap::default()))
                 .take(SHARDS)
-                .collect::<Vec<_>>()
-                .into_boxed_slice()
+                .collect::<Box<_>>()
                 .try_into()
                 .unwrap_or_else(|_| unreachable!()),
         }
@@ -86,5 +85,23 @@ impl<V, S: BuildHasher> StateMap<V, S> {
         f: impl FnOnce() -> V,
     ) -> MappedRwLockWriteGuard<V> {
         self.get_raw_or_insert_with(self.index(k), f)
+    }
+    pub fn map_values<T>(self, f: impl Fn(V) -> T) -> StateMap<T, S> {
+        StateMap {
+            hasher: self.hasher,
+            buckets: std::array::IntoIter::new(*self.buckets)
+                .map(|shard| {
+                    RwLock::new(
+                        shard
+                            .into_inner()
+                            .into_iter()
+                            .map(|(k, v)| (k, f(v)))
+                            .collect(),
+                    )
+                })
+                .collect::<Box<_>>()
+                .try_into()
+                .unwrap_or_else(|_| unreachable!()),
+        }
     }
 }
