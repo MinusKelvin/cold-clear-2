@@ -24,7 +24,6 @@ pub(super) struct Node<E: Evaluation> {
     pub expanding: AtomicBool,
     // we need this info while backpropagating, but we don't have access to the game state then
     bag: EnumSet<Piece>,
-    reserve: Piece,
 }
 
 impl<E: Evaluation> Layer<E> {
@@ -35,7 +34,6 @@ impl<E: Evaluation> Layer<E> {
             children: None,
             expanding: AtomicBool::new(false),
             bag: root.bag,
-            reserve: root.reserve,
         });
     }
 
@@ -104,7 +102,6 @@ impl<E: Evaluation> Layer<E> {
                 children: None,
                 expanding: AtomicBool::new(false),
                 bag: child.resulting_state.bag,
-                reserve: child.resulting_state.reserve,
             });
         node.parents.push((parent, child.mv, speculation_piece));
         node.eval
@@ -180,7 +177,6 @@ impl<E: Evaluation> Layer<E> {
             let child_eval = next_layer.kind.get_eval(update.child);
 
             let parent_bag = parent.bag;
-            let parent_reserve = parent.reserve;
             let children = parent.children.as_mut().unwrap();
             let list = &mut children[update.speculation_piece];
 
@@ -189,11 +185,7 @@ impl<E: Evaluation> Layer<E> {
             if is_best {
                 let best_for = |p: Piece| children[p].first().map(|c| c.cached_eval);
 
-                let eval = E::average(
-                    parent_bag
-                        .iter()
-                        .map(|p| best_for(p).max(best_for(parent_reserve))),
-                );
+                let eval = E::average(parent_bag.iter().map(best_for));
 
                 if parent.eval != eval {
                     parent.eval = eval;
