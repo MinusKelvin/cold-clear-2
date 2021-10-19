@@ -39,6 +39,7 @@ impl<E: Evaluation> Layer<E> {
     }
 
     pub fn suggest(&self, state: &GameState) -> Vec<Placement> {
+        puffin::profile_function!();
         let node = self.states.get(&state).unwrap();
         let children = match &node.children {
             Some(children) => children,
@@ -55,6 +56,7 @@ impl<E: Evaluation> Layer<E> {
     }
 
     pub fn select(&self, game_state: &GameState) -> SelectResult {
+        puffin::profile_function!();
         let node = self
             .states
             .get(&game_state)
@@ -114,6 +116,7 @@ impl<E: Evaluation> Layer<E> {
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
     ) -> Vec<BackpropUpdate> {
+        puffin::profile_function!();
         let mut childs_data = vec![];
         let mut childs_indices = [0; 8];
 
@@ -122,18 +125,21 @@ impl<E: Evaluation> Layer<E> {
         let parent_index = self.states.index(&parent_state);
         let mut parent = self.states.get_raw_mut(parent_index).unwrap();
 
-        for speculation_piece in EnumSet::all() {
-            for child in &children[speculation_piece] {
-                let eval = next_layer
-                    .kind
-                    .create_node(&child, parent_index, speculation_piece);
-                childs_data.push(Child {
-                    mv: child.mv,
-                    cached_eval: eval + child.reward,
-                    reward: child.reward,
-                });
+        {
+            puffin::profile_scope!("create nodes");
+            for speculation_piece in EnumSet::all() {
+                for child in &children[speculation_piece] {
+                    let eval = next_layer
+                        .kind
+                        .create_node(&child, parent_index, speculation_piece);
+                    childs_data.push(Child {
+                        mv: child.mv,
+                        cached_eval: eval + child.reward,
+                        reward: child.reward,
+                    });
+                }
+                childs_indices[speculation_piece as usize + 1] = childs_data.len() as u16;
             }
-            childs_indices[speculation_piece as usize + 1] = childs_data.len() as u16;
         }
 
         let mut children = PackedChildren {
@@ -173,6 +179,7 @@ impl<E: Evaluation> Layer<E> {
         to_update: Vec<BackpropUpdate>,
         next_layer: &LayerCommon<E>,
     ) -> Vec<BackpropUpdate> {
+        puffin::profile_function!();
         let mut new_updates = vec![];
 
         for update in to_update {

@@ -6,6 +6,7 @@ use ahash::AHashMap;
 use crate::data::*;
 
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
+    puffin::profile_function!();
     let mut queue = BinaryHeap::with_capacity(64);
     let mut values = AHashMap::with_capacity(64);
     let mut locks = AHashMap::with_capacity(64);

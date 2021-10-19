@@ -23,19 +23,23 @@ impl Freestyle {
 
 impl Mode for Freestyle {
     fn advance(&mut self, _options: &BotOptions, mv: Placement) -> Option<ModeSwitch> {
+        puffin::profile_function!();
         self.dag.advance(mv);
         None
     }
 
     fn new_piece(&mut self, _options: &BotOptions, piece: Piece) {
+        puffin::profile_function!();
         self.dag.add_piece(piece);
     }
 
     fn suggest(&self, _options: &BotOptions) -> Vec<Placement> {
+        puffin::profile_function!();
         self.dag.suggest()
     }
 
     fn do_work(&self, options: &BotOptions) -> Statistics {
+        puffin::profile_function!();
         let mut new_stats = Statistics::default();
         new_stats.selections += 1;
 
@@ -44,33 +48,39 @@ impl Mode for Freestyle {
             let next_possibilities = next.map(EnumSet::only).unwrap_or(state.bag);
 
             let mut moves = EnumMap::default();
-            for piece in next_possibilities | state.reserve {
-                moves[piece] = find_moves(&state.board, piece);
+            {
+                puffin::profile_scope!("movegen");
+                for piece in next_possibilities | state.reserve {
+                    moves[piece] = find_moves(&state.board, piece);
+                }
             }
 
             let mut children: EnumMap<_, Vec<_>> = EnumMap::default();
 
-            for next in next_possibilities {
-                let moves = moves[next].iter().chain(if next == state.reserve {
-                    [].iter()
-                } else {
-                    moves[state.reserve].iter()
-                });
-                for &(mv, sd_distance) in moves {
-                    let mut state = state;
-                    let info = state.advance(next, mv);
-
-                    let (eval, reward) = evaluate(&DEFAULT_WEIGHTS, state, &info, sd_distance);
-
-                    children[next].push(ChildData {
-                        resulting_state: state,
-                        mv,
-                        eval,
-                        reward,
+            {
+                puffin::profile_scope!("eval");
+                for next in next_possibilities {
+                    let moves = moves[next].iter().chain(if next == state.reserve {
+                        [].iter()
+                    } else {
+                        moves[state.reserve].iter()
                     });
-                }
+                    for &(mv, sd_distance) in moves {
+                        let mut state = state;
+                        let info = state.advance(next, mv);
 
-                new_stats.nodes += children[next].len() as u64;
+                        let (eval, reward) = evaluate(&DEFAULT_WEIGHTS, state, &info, sd_distance);
+
+                        children[next].push(ChildData {
+                            resulting_state: state,
+                            mv,
+                            eval,
+                            reward,
+                        });
+                    }
+
+                    new_stats.nodes += children[next].len() as u64;
+                }
             }
 
             new_stats.expansions += 1;

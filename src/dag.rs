@@ -79,6 +79,7 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn advance(&mut self, mv: Placement) {
+        puffin::profile_function!();
         let top_layer = std::mem::take(&mut *self.top_layer);
         self.root.advance(
             top_layer
@@ -93,6 +94,7 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn add_piece(&mut self, piece: Piece) {
+        puffin::profile_function!();
         let mut layer = &mut self.top_layer;
         loop {
             if layer.kind.despeculate(piece) {
@@ -104,10 +106,12 @@ impl<E: Evaluation> Dag<E> {
     }
 
     pub fn suggest(&self) -> Vec<Placement> {
+        puffin::profile_function!();
         self.top_layer.kind.suggest(&self.root)
     }
 
     pub fn select(&self, speculate: bool) -> Option<Selection<E>> {
+        puffin::profile_function!();
         let mut layers = vec![&*self.top_layer];
         let mut game_state = self.root;
         loop {
@@ -131,12 +135,14 @@ impl<E: Evaluation> Selection<'_, E> {
     }
 
     pub fn expand(self, children: EnumMap<Piece, Vec<ChildData<E>>>) {
+        puffin::profile_function!();
         let mut layers = self.layers;
         let start_layer = layers.pop().unwrap();
         let mut next = start_layer
             .kind
             .expand(&start_layer.next_layer, self.game_state, children);
 
+        puffin::profile_scope!("backprop");
         let mut next_layer = start_layer;
         while let Some(layer) = layers.pop() {
             next = layer.kind.backprop(next, next_layer);
@@ -192,6 +198,7 @@ impl<E: Evaluation> LayerKind<E> {
         to_update: Vec<BackpropUpdate>,
         next_layer: &LayerCommon<E>,
     ) -> Vec<BackpropUpdate> {
+        puffin::profile_function!();
         match self {
             LayerKind::Known(l) => l.backprop(to_update, next_layer),
             LayerKind::Speculated(l) => l.backprop(to_update, next_layer),
@@ -211,6 +218,7 @@ impl<E: Evaluation> LayerKind<E> {
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
     ) -> Vec<BackpropUpdate> {
+        puffin::profile_function!();
         match self {
             LayerKind::Known(l) => l.expand(next_layer, parent_state, children),
             LayerKind::Speculated(l) => l.expand(next_layer, parent_state, children),
@@ -218,6 +226,7 @@ impl<E: Evaluation> LayerKind<E> {
     }
 
     fn select(&self, game_state: &GameState, speculate: bool) -> SelectResult {
+        puffin::profile_function!();
         match self {
             LayerKind::Known(l) => l.select(game_state),
             LayerKind::Speculated(l) if speculate => l.select(game_state),
@@ -226,6 +235,7 @@ impl<E: Evaluation> LayerKind<E> {
     }
 
     fn suggest(&self, state: &GameState) -> Vec<Placement> {
+        puffin::profile_function!();
         match self {
             LayerKind::Known(l) => l.suggest(state),
             LayerKind::Speculated(l) => l.suggest(state),
@@ -233,6 +243,7 @@ impl<E: Evaluation> LayerKind<E> {
     }
 
     fn despeculate(&mut self, piece: Piece) -> bool {
+        puffin::profile_function!();
         let old = match self {
             LayerKind::Known(_) => return false,
             LayerKind::Speculated(l) => std::mem::take(l),

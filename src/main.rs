@@ -14,5 +14,10 @@ fn main() {
     futures::pin_mut!(incoming);
     futures::pin_mut!(outgoing);
 
+    puffin::set_scopes_on(cfg!(feature = "puffin_http"));
+    #[cfg(feature = "puffin_http")]
+    let _puffin_server =
+        puffin_http::Server::new(&format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT));
+
     futures::executor::block_on(cold_clear_2::run(incoming, outgoing));
 }

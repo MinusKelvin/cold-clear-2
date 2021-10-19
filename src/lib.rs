@@ -67,6 +67,7 @@ pub async fn run(
             }
             FrontendMessage::Play { mv } => {
                 bot.advance(mv.into());
+                puffin::GlobalProfiler::lock().new_frame();
             }
             FrontendMessage::NewPiece { piece } => {
                 if let Some(mut msg) = waiting_on_first_piece.take() {
@@ -137,7 +138,7 @@ fn create_bot(start_msg: FrontendMessage) -> Bot {
 }
 
 fn spawn_workers(bot: &Arc<BotSyncronizer>) {
-    for _ in 0..16 {
+    for _ in 0..4 {
         let bot = bot.clone();
         std::thread::spawn(move || bot.work_loop());
     }
