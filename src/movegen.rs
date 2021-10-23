@@ -7,13 +7,13 @@ use crate::data::*;
 
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
     puffin::profile_function!();
-    let mut queue = BinaryHeap::with_capacity(64);
-    let mut values = AHashMap::with_capacity(64);
-    let mut locks = AHashMap::with_capacity(64);
+    let mut queue = BinaryHeap::new();
+    let mut values = AHashMap::new();
+    let mut underground_locks = AHashMap::new();
+    let mut locks = Vec::with_capacity(64);
 
-    let fast_mode;
-    if board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16) {
-        fast_mode = true;
+    let fast_mode = board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16);
+    if fast_mode {
         for &rotation in &[
             Rotation::North,
             Rotation::East,
@@ -36,23 +36,33 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                     location,
                     spin: Spin::None,
                 };
-                queue.push(Intermediate {
-                    mv,
-                    soft_drops: distance as u32,
-                });
-                values.insert(mv, distance as u32);
-                locks.insert(
+
+                let mut update_position =
+                    update_position(&mut queue, &mut values, fast_mode, board);
+
+                if let Some(mv) = shift(location, board, -1) {
+                    update_position(mv, distance as u32);
+                }
+                if let Some(mv) = shift(location, board, 1) {
+                    update_position(mv, distance as u32);
+                }
+                if let Some(mv) = rotate_cw(location, board) {
+                    update_position(mv, distance as u32);
+                }
+                if let Some(mv) = rotate_ccw(location, board) {
+                    update_position(mv, distance as u32);
+                }
+
+                locks.push((
                     Placement {
                         location: mv.location.canonical_form(),
                         ..mv
                     },
                     0,
-                );
+                ));
             }
         }
     } else {
-        fast_mode = false;
-
         let mut spawned = PieceLocation {
             piece,
             rotation: Rotation::North,
@@ -94,7 +104,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             },
         };
 
-        let sds = locks
+        let sds = underground_locks
             .entry(Placement {
                 location: dropped.location.canonical_form(),
                 ..dropped
@@ -102,19 +112,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             .or_insert(expand.soft_drops);
         *sds = expand.soft_drops.min(*sds);
 
-        let mut update_position = |target: Placement, soft_drops: u32| {
-            if fast_mode && target.location.above_stack(&board) {
-                return;
-            }
-            let prev_sds = values.entry(target).or_insert(40);
-            if soft_drops < *prev_sds {
-                *prev_sds = soft_drops;
-                queue.push(Intermediate {
-                    soft_drops,
-                    mv: target,
-                });
-            }
-        };
+        let mut update_position = update_position(&mut queue, &mut values, fast_mode, board);
 
         update_position(dropped, expand.soft_drops + drop_dist as u32);
 
@@ -132,7 +130,29 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
         }
     }
 
-    locks.into_iter().collect()
+    locks.extend(underground_locks.into_iter());
+    locks
+}
+
+fn update_position<'a>(
+    queue: &'a mut BinaryHeap<Intermediate>,
+    values: &'a mut AHashMap<Placement, u32>,
+    fast_mode: bool,
+    board: &'a Board,
+) -> impl FnMut(Placement, u32) + 'a {
+    move |target: Placement, soft_drops: u32| {
+        if fast_mode && target.location.above_stack(&board) {
+            return;
+        }
+        let prev_sds = values.entry(target).or_insert(40);
+        if soft_drops < *prev_sds {
+            *prev_sds = soft_drops;
+            queue.push(Intermediate {
+                soft_drops,
+                mv: target,
+            });
+        }
+    }
 }
 
 fn shift(mut location: PieceLocation, board: &Board, dx: i8) -> Option<Placement> {
