@@ -1,10 +1,10 @@
 use std::ops::{Index, IndexMut};
 use std::sync::atomic::{self, AtomicBool};
 
+use bumpalo_herd::{Herd, Member};
 use enum_map::EnumMap;
 use enumset::EnumSet;
 use rand::prelude::*;
-use smallvec::SmallVec;
 
 use crate::data::{GameState, Piece, Placement};
 use crate::map::StateMap;
@@ -14,23 +14,23 @@ use super::{
 };
 
 #[derive(Default)]
-pub(super) struct Layer<E: Evaluation> {
-    pub states: StateMap<Node<E>>,
+pub(super) struct Layer<'bump, E: Evaluation> {
+    pub states: StateMap<Node<'bump, E>>,
 }
 
-pub(super) struct Node<E: Evaluation> {
-    pub parents: SmallVec<[(u64, Placement, Piece); 1]>,
+pub(super) struct Node<'bump, E: Evaluation> {
+    pub parents: &'bump [(u64, Placement, Piece)],
     pub eval: E,
-    pub children: Option<PackedChildren<E>>,
+    pub children: Option<PackedChildren<'bump, E>>,
     pub expanding: AtomicBool,
     // we need this info while backpropagating, but we don't have access to the game state then
     bag: EnumSet<Piece>,
 }
 
-impl<E: Evaluation> Layer<E> {
+impl<'bump, E: Evaluation> Layer<'bump, E> {
     pub fn initialize_root(&self, root: &GameState) {
         let _ = self.states.get_or_insert_with(root, || Node {
-            parents: SmallVec::new(),
+            parents: &[],
             eval: E::default(),
             children: None,
             expanding: AtomicBool::new(false),
@@ -96,22 +96,34 @@ impl<E: Evaluation> Layer<E> {
         self.states.get_raw(raw).unwrap().eval
     }
 
-    pub fn create_node(&self, child: &ChildData<E>, parent: u64, speculation_piece: Piece) -> E {
+    pub fn create_node(
+        &self,
+        bump: &Member<'bump>,
+        child: &ChildData<E>,
+        parent: u64,
+        speculation_piece: Piece,
+    ) -> E {
         let mut node = self
             .states
             .get_or_insert_with(&child.resulting_state, || Node {
-                parents: SmallVec::new(),
+                parents: &[],
                 eval: child.eval,
                 children: None,
                 expanding: AtomicBool::new(false),
                 bag: child.resulting_state.bag,
             });
-        node.parents.push((parent, child.mv, speculation_piece));
+        node.parents = bump.alloc_slice_fill_with(node.parents.len() + 1, |i| {
+            node.parents
+                .get(i)
+                .copied()
+                .unwrap_or((parent, child.mv, speculation_piece))
+        });
         node.eval
     }
 
     pub fn expand(
         &self,
+        herd: &'bump Herd,
         next_layer: &LayerCommon<E>,
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
@@ -128,10 +140,12 @@ impl<E: Evaluation> Layer<E> {
         {
             puffin::profile_scope!("create nodes");
             for speculation_piece in EnumSet::all() {
-                for child in &children[speculation_piece] {
-                    let eval = next_layer
-                        .kind
-                        .create_node(&child, parent_index, speculation_piece);
+                let evals = next_layer.kind.create_nodes(
+                    &children[speculation_piece],
+                    parent_index,
+                    speculation_piece,
+                );
+                for (child, eval) in children[speculation_piece].iter().zip(evals.into_iter()) {
                     childs_data.push(Child {
                         mv: child.mv,
                         cached_eval: eval + child.reward,
@@ -143,7 +157,7 @@ impl<E: Evaluation> Layer<E> {
         }
 
         let mut children = PackedChildren {
-            data: childs_data.into_boxed_slice(),
+            data: herd.get().alloc_slice_copy(&childs_data),
             start_indices: childs_indices,
         };
 
@@ -162,7 +176,7 @@ impl<E: Evaluation> Layer<E> {
 
         let mut next = vec![];
 
-        for &(grandparent, mv, speculation_piece) in &parent.parents {
+        for &(grandparent, mv, speculation_piece) in parent.parents {
             next.push(BackpropUpdate {
                 parent: grandparent,
                 mv,
@@ -200,7 +214,7 @@ impl<E: Evaluation> Layer<E> {
                 if parent.eval != eval {
                     parent.eval = eval;
 
-                    for &(parent, mv, speculation_piece) in &parent.parents {
+                    for &(parent, mv, speculation_piece) in parent.parents {
                         new_updates.push(BackpropUpdate {
                             parent,
                             mv,
@@ -216,12 +230,12 @@ impl<E: Evaluation> Layer<E> {
     }
 }
 
-pub(super) struct PackedChildren<E: Evaluation> {
-    data: Box<[Child<E>]>,
+pub(super) struct PackedChildren<'bump, E: Evaluation> {
+    data: &'bump mut [Child<E>],
     start_indices: [u16; 8],
 }
 
-impl<E: Evaluation> Index<Piece> for PackedChildren<E> {
+impl<'bump, E: Evaluation> Index<Piece> for PackedChildren<'bump, E> {
     type Output = [Child<E>];
 
     fn index(&self, index: Piece) -> &Self::Output {
@@ -231,10 +245,18 @@ impl<E: Evaluation> Index<Piece> for PackedChildren<E> {
     }
 }
 
-impl<E: Evaluation> IndexMut<Piece> for PackedChildren<E> {
+impl<'bump, E: Evaluation> IndexMut<Piece> for PackedChildren<'bump, E> {
     fn index_mut(&mut self, index: Piece) -> &mut Self::Output {
         let start = self.start_indices[index as usize] as usize;
         let end = self.start_indices[index as usize + 1] as usize;
+        &mut self.data[start..end]
+    }
+}
+
+impl<'bump, E: Evaluation> PackedChildren<'bump, E> {
+    pub(super) fn into_children(self, piece: Piece) -> &'bump mut [Child<E>] {
+        let start = self.start_indices[piece as usize] as usize;
+        let end = self.start_indices[piece as usize + 1] as usize;
         &mut self.data[start..end]
     }
 }

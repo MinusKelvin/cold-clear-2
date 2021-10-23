@@ -1,5 +1,7 @@
+use bumpalo_herd::Herd;
 use enum_map::EnumMap;
 use once_cell::sync::Lazy;
+use ouroboros::self_referencing;
 
 use crate::data::Placement;
 use crate::data::{GameState, Piece};
@@ -7,7 +9,9 @@ use crate::data::{GameState, Piece};
 mod known;
 mod speculated;
 
-pub trait Evaluation: Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> {
+pub trait Evaluation:
+    Ord + Copy + Default + std::ops::Add<Self::Reward, Output = Self> + 'static
+{
     type Reward: Copy;
 
     fn average(of: impl Iterator<Item = Option<Self>>) -> Self;
@@ -33,12 +37,20 @@ pub struct ChildData<E: Evaluation> {
 #[derive(Default)]
 struct LayerCommon<E: Evaluation> {
     next_layer: Lazy<Box<LayerCommon<E>>>,
-    kind: LayerKind<E>,
+    kind: WithBump<E>,
 }
 
-enum LayerKind<E: Evaluation> {
-    Known(known::Layer<E>),
-    Speculated(speculated::Layer<E>),
+#[self_referencing]
+struct WithBump<E: Evaluation> {
+    bump: Herd,
+    #[borrows(bump)]
+    #[not_covariant]
+    data: LayerKind<'this, E>,
+}
+
+enum LayerKind<'bump, E: Evaluation> {
+    Known(known::Layer<'bump, E>),
+    Speculated(speculated::Layer<'bump, E>),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -185,12 +197,12 @@ fn update_child<E: Evaluation>(list: &mut [Child<E>], placement: Placement, chil
     index == 0
 }
 
-impl<E: Evaluation> LayerKind<E> {
+impl<E: Evaluation> WithBump<E> {
     fn initialize_root(&self, root: &GameState) {
-        match self {
-            Self::Known(l) => l.initialize_root(root),
-            Self::Speculated(l) => l.initialize_root(root),
-        }
+        self.with(|this| match this.data {
+            LayerKind::Known(l) => l.initialize_root(root),
+            LayerKind::Speculated(l) => l.initialize_root(root),
+        });
     }
 
     fn backprop(
@@ -199,17 +211,17 @@ impl<E: Evaluation> LayerKind<E> {
         next_layer: &LayerCommon<E>,
     ) -> Vec<BackpropUpdate> {
         puffin::profile_function!();
-        match self {
+        self.with(|this| match this.data {
             LayerKind::Known(l) => l.backprop(to_update, next_layer),
             LayerKind::Speculated(l) => l.backprop(to_update, next_layer),
-        }
+        })
     }
 
     fn piece(&self) -> Option<Piece> {
-        match self {
+        self.with(|this| match this.data {
             LayerKind::Known(l) => Some(l.piece),
             LayerKind::Speculated(_) => None,
-        }
+        })
     }
 
     fn expand(
@@ -219,70 +231,87 @@ impl<E: Evaluation> LayerKind<E> {
         children: EnumMap<Piece, Vec<ChildData<E>>>,
     ) -> Vec<BackpropUpdate> {
         puffin::profile_function!();
-        match self {
-            LayerKind::Known(l) => l.expand(next_layer, parent_state, children),
-            LayerKind::Speculated(l) => l.expand(next_layer, parent_state, children),
-        }
+        self.with(|this| match this.data {
+            LayerKind::Known(l) => l.expand(this.bump, next_layer, parent_state, children),
+            LayerKind::Speculated(l) => l.expand(this.bump, next_layer, parent_state, children),
+        })
     }
 
     fn select(&self, game_state: &GameState, speculate: bool) -> SelectResult {
         puffin::profile_function!();
-        match self {
+        self.with(|this| match this.data {
             LayerKind::Known(l) => l.select(game_state),
             LayerKind::Speculated(l) if speculate => l.select(game_state),
             LayerKind::Speculated(_) => SelectResult::Failed,
-        }
+        })
     }
 
     fn suggest(&self, state: &GameState) -> Vec<Placement> {
         puffin::profile_function!();
-        match self {
+        self.with(|this| match this.data {
             LayerKind::Known(l) => l.suggest(state),
             LayerKind::Speculated(l) => l.suggest(state),
-        }
+        })
     }
 
     fn despeculate(&mut self, piece: Piece) -> bool {
         puffin::profile_function!();
-        let old = match self {
-            LayerKind::Known(_) => return false,
-            LayerKind::Speculated(l) => std::mem::take(l),
-        };
+        self.with_mut(|this| {
+            let old = match this.data {
+                LayerKind::Known(_) => return false,
+                LayerKind::Speculated(l) => std::mem::take(l),
+            };
 
-        let layer = known::Layer {
-            states: old.states.map_values(|node| known::Node {
-                parents: node.parents,
-                eval: node.eval,
-                children: node
-                    .children
-                    .map(|v| v[piece].to_owned().into_boxed_slice()),
-                expanding: node.expanding,
-            }),
-            piece,
-        };
+            let layer = known::Layer {
+                states: old.states.map_values(|node| known::Node {
+                    parents: node.parents,
+                    eval: node.eval,
+                    children: node.children.map(|v| v.into_children(piece)),
+                    expanding: node.expanding,
+                }),
+                piece,
+            };
 
-        *self = LayerKind::Known(layer);
+            *this.data = LayerKind::Known(layer);
 
-        true
+            true
+        })
     }
 
     fn get_eval(&self, raw: u64) -> E {
-        match self {
+        self.with(|this| match this.data {
             LayerKind::Known(l) => l.get_eval(raw),
             LayerKind::Speculated(l) => l.get_eval(raw),
-        }
+        })
     }
 
-    fn create_node(&self, child: &ChildData<E>, parent: u64, speculation_piece: Piece) -> E {
-        match self {
-            LayerKind::Known(l) => l.create_node(child, parent, speculation_piece),
-            LayerKind::Speculated(l) => l.create_node(child, parent, speculation_piece),
-        }
+    fn create_nodes(
+        &self,
+        children: &[ChildData<E>],
+        parent: u64,
+        speculation_piece: Piece,
+    ) -> Vec<E> {
+        self.with(|this| match this.data {
+            LayerKind::Known(l) => {
+                let bump = this.bump.get();
+                children
+                    .iter()
+                    .map(|child| l.create_node(&bump, child, parent, speculation_piece))
+                    .collect()
+            }
+            LayerKind::Speculated(l) => {
+                let bump = this.bump.get();
+                children
+                    .iter()
+                    .map(|child| l.create_node(&bump, child, parent, speculation_piece))
+                    .collect()
+            }
+        })
     }
 }
 
-impl<E: Evaluation> Default for LayerKind<E> {
+impl<E: Evaluation> Default for WithBump<E> {
     fn default() -> Self {
-        LayerKind::Speculated(Default::default())
+        WithBump::new(Herd::new(), |_| LayerKind::Speculated(Default::default()))
     }
 }

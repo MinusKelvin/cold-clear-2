@@ -1,8 +1,8 @@
 use std::sync::atomic::{self, AtomicBool};
 
+use bumpalo_herd::{Herd, Member};
 use enum_map::EnumMap;
 use rand::prelude::*;
-use smallvec::SmallVec;
 
 use crate::data::{GameState, Piece, Placement};
 use crate::map::StateMap;
@@ -11,22 +11,22 @@ use super::{
     update_child, BackpropUpdate, Child, ChildData, Evaluation, LayerCommon, SelectResult,
 };
 
-pub(super) struct Layer<E: Evaluation> {
-    pub states: StateMap<Node<E>>,
+pub(super) struct Layer<'bump, E: Evaluation> {
+    pub states: StateMap<Node<'bump, E>>,
     pub piece: Piece,
 }
 
-pub(super) struct Node<E: Evaluation> {
-    pub parents: SmallVec<[(u64, Placement, Piece); 1]>,
+pub(super) struct Node<'bump, E: Evaluation> {
+    pub parents: &'bump [(u64, Placement, Piece)],
     pub eval: E,
-    pub children: Option<Box<[Child<E>]>>,
+    pub children: Option<&'bump mut [Child<E>]>,
     pub expanding: AtomicBool,
 }
 
-impl<E: Evaluation> Layer<E> {
+impl<'bump, E: Evaluation> Layer<'bump, E> {
     pub fn initialize_root(&self, root: &GameState) {
         let _ = self.states.get_or_insert_with(root, || Node {
-            parents: SmallVec::new(),
+            parents: &[],
             eval: E::default(),
             children: None,
             expanding: AtomicBool::new(false),
@@ -83,21 +83,33 @@ impl<E: Evaluation> Layer<E> {
         self.states.get_raw(raw).unwrap().eval
     }
 
-    pub fn create_node(&self, child: &ChildData<E>, parent: u64, speculation_piece: Piece) -> E {
+    pub fn create_node(
+        &self,
+        bump: &Member<'bump>,
+        child: &ChildData<E>,
+        parent: u64,
+        speculation_piece: Piece,
+    ) -> E {
         let mut node = self
             .states
             .get_or_insert_with(&child.resulting_state, || Node {
-                parents: SmallVec::new(),
+                parents: &[],
                 eval: child.eval,
                 children: None,
                 expanding: AtomicBool::new(false),
             });
-        node.parents.push((parent, child.mv, speculation_piece));
+        node.parents = bump.alloc_slice_fill_with(node.parents.len() + 1, |i| {
+            node.parents
+                .get(i)
+                .copied()
+                .unwrap_or((parent, child.mv, speculation_piece))
+        });
         node.eval
     }
 
     pub fn expand(
         &self,
+        herd: &'bump Herd,
         next_layer: &LayerCommon<E>,
         parent_state: GameState,
         children: EnumMap<Piece, Vec<ChildData<E>>>,
@@ -112,8 +124,11 @@ impl<E: Evaluation> Layer<E> {
 
         {
             puffin::profile_scope!("create nodes");
-            for child in &children[self.piece] {
-                let eval = next_layer.kind.create_node(child, parent_index, self.piece);
+            let evals =
+                next_layer
+                    .kind
+                    .create_nodes(&children[self.piece], parent_index, self.piece);
+            for (child, eval) in children[self.piece].iter().zip(evals.into_iter()) {
                 childs.push(Child {
                     mv: child.mv,
                     cached_eval: eval + child.reward,
@@ -125,11 +140,11 @@ impl<E: Evaluation> Layer<E> {
         childs.sort_by(|a, b| a.cached_eval.cmp(&b.cached_eval).reverse());
 
         parent.eval = E::average(std::iter::once(childs.first().map(|c| c.cached_eval)));
-        parent.children = Some(childs.into_boxed_slice());
+        parent.children = Some(herd.get().alloc_slice_copy(&childs));
 
         let mut next = vec![];
 
-        for &(grandparent, mv, speculation_piece) in &parent.parents {
+        for &(grandparent, mv, speculation_piece) in parent.parents {
             next.push(BackpropUpdate {
                 parent: grandparent,
                 mv,
@@ -167,7 +182,7 @@ impl<E: Evaluation> Layer<E> {
                 if parent.eval != eval {
                     parent.eval = eval;
 
-                    for &(parent, mv, speculation_piece) in &parent.parents {
+                    for &(parent, mv, speculation_piece) in parent.parents {
                         new_updates.push(BackpropUpdate {
                             parent,
                             mv,
