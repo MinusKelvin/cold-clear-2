@@ -53,13 +53,9 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                     update_position(mv, distance as u32);
                 }
 
-                locks.push((
-                    Placement {
-                        location: mv.location.canonical_form(),
-                        ..mv
-                    },
-                    0,
-                ));
+                if location.canonical_form() == location {
+                    locks.push((mv, 0));
+                }
             }
         }
     } else {
