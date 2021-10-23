@@ -14,9 +14,9 @@ use crate::sync::BotSyncronizer;
 mod bot;
 mod convert;
 mod dag;
-mod data;
+pub mod data;
 mod map;
-mod movegen;
+pub mod movegen;
 mod sync;
 
 pub async fn run(
