@@ -163,6 +163,8 @@ fn shift(mut location: PieceLocation, board: &Board, dx: i8) -> Option<Placement
 }
 
 fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
+    const KICKS: [[[(i8, i8); 5]; 4]; 7] =
+        piece_lut!(piece => rotation_lut!(rotation => kicks(piece, rotation, rotation.cw())));
     let unkicked = PieceLocation {
         rotation: from.rotation.cw(),
         ..from
@@ -170,13 +172,13 @@ fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
     rotate(
         unkicked,
         board,
-        offsets(from)
-            .zip(offsets(unkicked))
-            .map(|((x1, y1), (x2, y2))| (x1 - x2, y1 - y2)),
+        KICKS[from.piece as usize][from.rotation as usize].iter().copied(),
     )
 }
 
 fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
+    const KICKS: [[[(i8, i8); 5]; 4]; 7] =
+        piece_lut!(piece => rotation_lut!(rotation => kicks(piece, rotation, rotation.ccw())));
     let unkicked = PieceLocation {
         rotation: from.rotation.ccw(),
         ..from
@@ -184,34 +186,43 @@ fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
     rotate(
         unkicked,
         board,
-        offsets(from)
-            .zip(offsets(unkicked))
-            .map(|((x1, y1), (x2, y2))| (x1 - x2, y1 - y2)),
+        KICKS[from.piece as usize][from.rotation as usize].iter().copied(),
     )
 }
 
-fn offsets(p: PieceLocation) -> impl Iterator<Item = (i8, i8)> {
-    match p.piece {
-        Piece::O => match p.rotation {
-            Rotation::North => [(0, 0)].iter(),
-            Rotation::East => [(0, -1)].iter(),
-            Rotation::South => [(-1, -1)].iter(),
-            Rotation::West => [(-1, 0)].iter(),
+const fn offsets(piece: Piece, rotation: Rotation) -> [(i8, i8); 5] {
+    match piece {
+        Piece::O => match rotation {
+            Rotation::North => [(0, 0); 5],
+            Rotation::East => [(0, -1); 5],
+            Rotation::South => [(-1, -1); 5],
+            Rotation::West => [(-1, 0); 5],
         },
-        Piece::I => match p.rotation {
-            Rotation::North => [(0, 0), (-1, 0), (2, 0), (-1, 0), (2, 0)].iter(),
-            Rotation::East => [(-1, 0), (0, 0), (0, 0), (0, 1), (0, -2)].iter(),
-            Rotation::South => [(-1, 1), (1, 1), (-2, 1), (1, 0), (-2, 0)].iter(),
-            Rotation::West => [(0, 1), (0, 1), (0, 1), (0, -1), (0, 2)].iter(),
+        Piece::I => match rotation {
+            Rotation::North => [(0, 0), (-1, 0), (2, 0), (-1, 0), (2, 0)],
+            Rotation::East => [(-1, 0), (0, 0), (0, 0), (0, 1), (0, -2)],
+            Rotation::South => [(-1, 1), (1, 1), (-2, 1), (1, 0), (-2, 0)],
+            Rotation::West => [(0, 1), (0, 1), (0, 1), (0, -1), (0, 2)],
         },
-        _ => match p.rotation {
-            Rotation::North => [(0, 0); 5].iter(),
-            Rotation::East => [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)].iter(),
-            Rotation::South => [(0, 0); 5].iter(),
-            Rotation::West => [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)].iter(),
+        _ => match rotation {
+            Rotation::North => [(0, 0); 5],
+            Rotation::East => [(0, 0), (1, 0), (1, -1), (0, 2), (1, 2)],
+            Rotation::South => [(0, 0); 5],
+            Rotation::West => [(0, 0), (-1, 0), (-1, -1), (0, 2), (-1, 2)],
         },
     }
-    .copied()
+}
+
+const fn kicks(piece: Piece, from: Rotation, to: Rotation) -> [(i8, i8); 5] {
+    let mut kicks = [(0, 0); 5];
+    let from = offsets(piece, from);
+    let to = offsets(piece, to);
+    let mut i = 0;
+    while i < kicks.len() {
+        kicks[i] = (from[i].0 - to[i].0, from[i].1 - to[i].1);
+        i += 1;
+    }
+    kicks
 }
 
 fn rotate(

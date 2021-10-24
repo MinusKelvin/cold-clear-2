@@ -120,39 +120,36 @@ impl Rotation {
     }
 }
 
+macro_rules! lutify {
+    (($e:expr) for $v:ident in [$($val:expr),*]) => {
+        [
+            $(
+                {
+                    let $v = $val;
+                    $e
+                }
+            ),*
+        ]
+    };
+}
+
+macro_rules! piece_lut {
+    ($v:ident => $e:expr) => {
+        lutify!(($e) for $v in [Piece::I, Piece::O, Piece::T, Piece::L, Piece::J, Piece::S, Piece::Z])
+    };
+}
+
+macro_rules! rotation_lut {
+    ($v:ident => $e:expr) => {
+        lutify!(($e) for $v in [Rotation::North, Rotation::West, Rotation::South, Rotation::East])
+    };
+}
+
 impl PieceLocation {
     pub const fn cells(&self) -> [(i8, i8); 4] {
-        const LUT: [[(i8, i8); 4]; 28] = [
-            Rotation::North.rotate_cells(Piece::I.cells()),
-            Rotation::West.rotate_cells(Piece::I.cells()),
-            Rotation::South.rotate_cells(Piece::I.cells()),
-            Rotation::East.rotate_cells(Piece::I.cells()),
-            Rotation::North.rotate_cells(Piece::O.cells()),
-            Rotation::West.rotate_cells(Piece::O.cells()),
-            Rotation::South.rotate_cells(Piece::O.cells()),
-            Rotation::East.rotate_cells(Piece::O.cells()),
-            Rotation::North.rotate_cells(Piece::T.cells()),
-            Rotation::West.rotate_cells(Piece::T.cells()),
-            Rotation::South.rotate_cells(Piece::T.cells()),
-            Rotation::East.rotate_cells(Piece::T.cells()),
-            Rotation::North.rotate_cells(Piece::L.cells()),
-            Rotation::West.rotate_cells(Piece::L.cells()),
-            Rotation::South.rotate_cells(Piece::L.cells()),
-            Rotation::East.rotate_cells(Piece::L.cells()),
-            Rotation::North.rotate_cells(Piece::J.cells()),
-            Rotation::West.rotate_cells(Piece::J.cells()),
-            Rotation::South.rotate_cells(Piece::J.cells()),
-            Rotation::East.rotate_cells(Piece::J.cells()),
-            Rotation::North.rotate_cells(Piece::S.cells()),
-            Rotation::West.rotate_cells(Piece::S.cells()),
-            Rotation::South.rotate_cells(Piece::S.cells()),
-            Rotation::East.rotate_cells(Piece::S.cells()),
-            Rotation::North.rotate_cells(Piece::Z.cells()),
-            Rotation::West.rotate_cells(Piece::Z.cells()),
-            Rotation::South.rotate_cells(Piece::Z.cells()),
-            Rotation::East.rotate_cells(Piece::Z.cells()),
-        ];
-        self.translate_cells(LUT[self.piece as usize * 4 + self.rotation as usize])
+        const LUT: [[[(i8, i8); 4]; 4]; 7] =
+            piece_lut!(piece => rotation_lut!(rotation => rotation.rotate_cells(piece.cells())));
+        self.translate_cells(LUT[self.piece as usize][self.rotation as usize])
     }
 
     const fn translate(&self, (x, y): (i8, i8)) -> (i8, i8) {
