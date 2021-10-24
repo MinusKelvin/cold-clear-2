@@ -163,6 +163,9 @@ fn shift(mut location: PieceLocation, board: &Board, dx: i8) -> Option<Placement
 }
 
 fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
+    if from.piece == Piece::O {
+        return None;
+    }
     const KICKS: [[[(i8, i8); 5]; 4]; 7] =
         piece_lut!(piece => rotation_lut!(rotation => kicks(piece, rotation, rotation.cw())));
     let unkicked = PieceLocation {
@@ -177,6 +180,9 @@ fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
 }
 
 fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
+    if from.piece == Piece::O {
+        return None;
+    }
     const KICKS: [[[(i8, i8); 5]; 4]; 7] =
         piece_lut!(piece => rotation_lut!(rotation => kicks(piece, rotation, rotation.ccw())));
     let unkicked = PieceLocation {
