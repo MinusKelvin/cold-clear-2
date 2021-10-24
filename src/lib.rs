@@ -45,7 +45,7 @@ pub async fn run(
             FrontendMessage::Start {
                 hold, ref queue, ..
             } => {
-                if hold.is_none() && queue.len() == 0 {
+                if hold.is_none() && queue.is_empty() {
                     waiting_on_first_piece = Some(msg);
                 } else {
                     bot.start(create_bot(msg));

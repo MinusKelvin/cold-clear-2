@@ -137,7 +137,7 @@ fn update_position<'a>(
     board: &'a Board,
 ) -> impl FnMut(Placement, u32) + 'a {
     move |target: Placement, soft_drops: u32| {
-        if fast_mode && target.location.above_stack(&board) {
+        if fast_mode && target.location.above_stack(board) {
             return;
         }
         let prev_sds = values.entry(target).or_insert(40);

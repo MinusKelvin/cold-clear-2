@@ -57,25 +57,13 @@ impl<V, S: BuildHasher> StateMap<V, S> {
         RwLockWriteGuard::try_map(self.bucket(k).write(), |shard| shard.get_mut(&k)).ok()
     }
 
-    pub fn get_mut(&self, k: &GameState) -> Option<MappedRwLockWriteGuard<V>> {
-        self.get_raw_mut(self.index(k))
-    }
-
-    pub fn insert(&self, k: &GameState, v: V) {
-        let i = self.index(k);
-        self.bucket(i).write().insert(i, v);
-    }
-
     pub fn get_raw_or_insert_with(
         &self,
         k: u64,
         f: impl FnOnce() -> V,
     ) -> MappedRwLockWriteGuard<V> {
         RwLockWriteGuard::map(self.bucket(k).write(), |shard| {
-            if !shard.contains_key(&k) {
-                shard.insert(k, f());
-            }
-            shard.get_mut(&k).unwrap()
+            shard.entry(k).or_insert_with(f)
         })
     }
 

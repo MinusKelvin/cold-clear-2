@@ -151,7 +151,6 @@ dependencies = [
  "puffin_http",
  "rand",
  "serde_json",
- "smallvec",
  "tbp",
 ]
 

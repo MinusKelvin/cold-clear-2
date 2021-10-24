@@ -93,6 +93,7 @@ impl From<Placement> for tbp::Move {
 impl From<[[Option<char>; 10]; 40]> for Board {
     fn from(board: [[Option<char>; 10]; 40]) -> Self {
         let mut cols = [0; 10];
+        #[allow(clippy::needless_range_loop)]
         for y in 0..40 {
             for x in 0..10 {
                 if board[y][x].is_some() {

@@ -40,7 +40,7 @@ impl<'bump, E: Evaluation> Layer<'bump, E> {
 
     pub fn suggest(&self, state: &GameState) -> Vec<Placement> {
         puffin::profile_function!();
-        let node = self.states.get(&state).unwrap();
+        let node = self.states.get(state).unwrap();
         let children = match &node.children {
             Some(children) => children,
             None => return vec![],
@@ -59,7 +59,7 @@ impl<'bump, E: Evaluation> Layer<'bump, E> {
         puffin::profile_function!();
         let node = self
             .states
-            .get(&game_state)
+            .get(game_state)
             .expect("Link to non-existent node?");
 
         let children = match &node.children {

@@ -40,6 +40,7 @@ pub struct PlacementInfo {
     pub perfect_clear: bool,
 }
 
+#[allow(clippy::derive_hash_xor_eq)]
 #[derive(EnumSetType, Enum, Debug, Hash)]
 pub enum Piece {
     I,
@@ -244,8 +245,8 @@ impl Board {
     }
 
     pub fn distance_to_ground(&self, x: i8, y: i8) -> i8 {
-        debug_assert!(x >= 0 && x < 10);
-        debug_assert!(y >= 0 && y < 40);
+        debug_assert!((0..10).contains(&x));
+        debug_assert!((0..40).contains(&y));
         if y == 0 {
             return 0;
         }
@@ -254,8 +255,8 @@ impl Board {
 
     pub fn place(&mut self, piece: PieceLocation) {
         for &(x, y) in &piece.cells() {
-            debug_assert!(x >= 0 && x < 10);
-            debug_assert!(y >= 0 && y < 40);
+            debug_assert!((0..10).contains(&x));
+            debug_assert!((0..40).contains(&y));
             self.cols[x as usize] |= 1 << y;
         }
     }
