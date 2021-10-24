@@ -77,7 +77,9 @@ impl<V, S: BuildHasher> StateMap<V, S> {
     pub fn map_values<T>(self, f: impl Fn(V) -> T) -> StateMap<T, S> {
         StateMap {
             hasher: self.hasher,
-            buckets: std::array::IntoIter::new(*self.buckets)
+            buckets: self
+                .buckets
+                .into_iter()
                 .map(|shard| {
                     RwLock::new(
                         shard
