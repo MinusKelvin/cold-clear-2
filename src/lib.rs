@@ -48,7 +48,7 @@ pub async fn run(
                 if hold.is_none() && queue.is_empty() {
                     waiting_on_first_piece = Some(msg);
                 } else {
-                    bot.start(create_bot(msg, None));
+                    bot.start(create_bot(msg));
                 }
             }
             FrontendMessage::Stop => {
@@ -72,8 +72,12 @@ pub async fn run(
             }
             FrontendMessage::NewPiece { piece } => {
                 if let Some(mut msg) = waiting_on_first_piece.take() {
-                    if let FrontendMessage::Start { .. } = &mut msg {
-                        bot.start(create_bot(msg, Some(piece)));
+                    if let FrontendMessage::Start { queue, randomizer, .. } = &mut msg {
+                        if let RandomizerState::SevenBag { bag_state } = randomizer {
+                            bag_state.retain(|p| p != &piece);
+                        }
+                        queue.push(piece);
+                        bot.start(create_bot(msg));
                     } else {
                         unreachable!()
                     }
@@ -89,19 +93,16 @@ pub async fn run(
     }
 }
 
-fn create_bot(start_msg: FrontendMessage, first_piece: Option<tbp::Piece>) -> Bot {
+fn create_bot(start_msg: FrontendMessage) -> Bot {
     if let FrontendMessage::Start {
         hold,
-        mut queue,
+        queue,
         combo,
         back_to_back,
         board,
         randomizer,
     } = start_msg
     {
-        if let Some(first_piece) = first_piece {
-            queue.push(first_piece);
-        }
         let mut queue = queue.into_iter().map(Into::into);
         let reserve = hold.map_or_else(|| queue.next().unwrap(), Into::into);
         let queue: Vec<_> = queue.collect();
@@ -111,10 +112,6 @@ fn create_bot(start_msg: FrontendMessage, first_piece: Option<tbp::Piece>) -> Bo
         match randomizer {
             RandomizerState::SevenBag { bag_state } => {
                 let mut bs: EnumSet<_> = bag_state.into_iter().map(Piece::from).collect();
-                if let Some(first_piece) = first_piece {
-                    bs.remove(Piece::from(first_piece));
-                }
-
                 for &p in queue.iter().rev() {
                     if bs == EnumSet::all() {
                         bs = EnumSet::empty();
