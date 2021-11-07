@@ -72,7 +72,10 @@ pub async fn run(
             }
             FrontendMessage::NewPiece { piece } => {
                 if let Some(mut msg) = waiting_on_first_piece.take() {
-                    if let FrontendMessage::Start { queue, .. } = &mut msg {
+                    if let FrontendMessage::Start { queue, randomizer, .. } = &mut msg {
+                        if let RandomizerState::SevenBag { bag_state } = randomizer {
+                            bag_state.retain(|p| p != &piece);
+                        }
                         queue.push(piece);
                         bot.start(create_bot(msg));
                     } else {
