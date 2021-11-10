@@ -1,57 +1,62 @@
 use crate::data::{Board, Piece, PieceLocation, Placement, Rotation};
 
-impl From<tbp::Piece> for Piece {
-    fn from(p: tbp::Piece) -> Self {
+use tbp::data::{
+    Move as TbpMove, Orientation as TbpOrientation, Piece as TbpPiece,
+    PieceLocation as TbpPieceLocation,
+};
+
+impl From<TbpPiece> for Piece {
+    fn from(p: TbpPiece) -> Self {
         match p {
-            tbp::Piece::I => Piece::I,
-            tbp::Piece::O => Piece::O,
-            tbp::Piece::T => Piece::T,
-            tbp::Piece::L => Piece::L,
-            tbp::Piece::J => Piece::J,
-            tbp::Piece::S => Piece::S,
-            tbp::Piece::Z => Piece::Z,
+            TbpPiece::I => Piece::I,
+            TbpPiece::O => Piece::O,
+            TbpPiece::T => Piece::T,
+            TbpPiece::L => Piece::L,
+            TbpPiece::J => Piece::J,
+            TbpPiece::S => Piece::S,
+            TbpPiece::Z => Piece::Z,
         }
     }
 }
 
-impl From<Piece> for tbp::Piece {
+impl From<Piece> for TbpPiece {
     fn from(p: Piece) -> Self {
         match p {
-            Piece::I => tbp::Piece::I,
-            Piece::O => tbp::Piece::O,
-            Piece::T => tbp::Piece::T,
-            Piece::L => tbp::Piece::L,
-            Piece::J => tbp::Piece::J,
-            Piece::S => tbp::Piece::S,
-            Piece::Z => tbp::Piece::Z,
+            Piece::I => TbpPiece::I,
+            Piece::O => TbpPiece::O,
+            Piece::T => TbpPiece::T,
+            Piece::L => TbpPiece::L,
+            Piece::J => TbpPiece::J,
+            Piece::S => TbpPiece::S,
+            Piece::Z => TbpPiece::Z,
         }
     }
 }
 
-impl From<tbp::Orientation> for Rotation {
-    fn from(r: tbp::Orientation) -> Self {
+impl From<TbpOrientation> for Rotation {
+    fn from(r: TbpOrientation) -> Self {
         match r {
-            tbp::Orientation::North => Rotation::North,
-            tbp::Orientation::East => Rotation::East,
-            tbp::Orientation::South => Rotation::South,
-            tbp::Orientation::West => Rotation::West,
+            TbpOrientation::North => Rotation::North,
+            TbpOrientation::East => Rotation::East,
+            TbpOrientation::South => Rotation::South,
+            TbpOrientation::West => Rotation::West,
         }
     }
 }
 
-impl From<Rotation> for tbp::Orientation {
+impl From<Rotation> for TbpOrientation {
     fn from(r: Rotation) -> Self {
         match r {
-            Rotation::North => tbp::Orientation::North,
-            Rotation::East => tbp::Orientation::East,
-            Rotation::South => tbp::Orientation::South,
-            Rotation::West => tbp::Orientation::West,
+            Rotation::North => TbpOrientation::North,
+            Rotation::East => TbpOrientation::East,
+            Rotation::South => TbpOrientation::South,
+            Rotation::West => TbpOrientation::West,
         }
     }
 }
 
-impl From<tbp::PieceLocation> for PieceLocation {
-    fn from(l: tbp::PieceLocation) -> Self {
+impl From<TbpPieceLocation> for PieceLocation {
+    fn from(l: TbpPieceLocation) -> Self {
         PieceLocation {
             piece: l.kind.into(),
             rotation: l.orientation.into(),
@@ -61,9 +66,9 @@ impl From<tbp::PieceLocation> for PieceLocation {
     }
 }
 
-impl From<PieceLocation> for tbp::PieceLocation {
+impl From<PieceLocation> for TbpPieceLocation {
     fn from(l: PieceLocation) -> Self {
-        tbp::PieceLocation {
+        TbpPieceLocation {
             kind: l.piece.into(),
             orientation: l.rotation.into(),
             x: l.x as i32,
@@ -72,8 +77,8 @@ impl From<PieceLocation> for tbp::PieceLocation {
     }
 }
 
-impl From<tbp::Move> for Placement {
-    fn from(mv: tbp::Move) -> Self {
+impl From<TbpMove> for Placement {
+    fn from(mv: TbpMove) -> Self {
         Placement {
             location: mv.location.into(),
             spin: mv.spin,
@@ -81,9 +86,9 @@ impl From<tbp::Move> for Placement {
     }
 }
 
-impl From<Placement> for tbp::Move {
+impl From<Placement> for TbpMove {
     fn from(mv: Placement) -> Self {
-        tbp::Move {
+        TbpMove {
             location: mv.location.into(),
             spin: mv.spin,
         }

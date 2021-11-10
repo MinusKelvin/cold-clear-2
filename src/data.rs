@@ -1,7 +1,7 @@
 use enum_map::Enum;
 use enumset::{EnumSet, EnumSetType};
 
-pub use tbp::Spin;
+pub use tbp::data::Spin;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Board {

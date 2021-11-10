@@ -5,7 +5,7 @@ use bot::BotOptions;
 use enumset::EnumSet;
 use futures::prelude::*;
 use tbp::randomizer::RandomizerState;
-use tbp::{BotMessage, FrontendMessage};
+use tbp::{bot_msg, frontend_msg, BotMessage, FrontendMessage};
 
 use crate::bot::Bot;
 use crate::data::{GameState, Piece};
@@ -25,12 +25,16 @@ pub async fn run(
     mut outgoing: impl Sink<BotMessage, Error = Infallible> + Unpin,
 ) {
     outgoing
-        .send(BotMessage::Info {
-            name: "Cold Clear 2".to_owned(),
-            author: "MinusKelvin".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            features: tbp::Feature::enabled(),
-        })
+        .send(
+            bot_msg::Info {
+                name: "Cold Clear 2".to_owned(),
+                author: "MinusKelvin".to_owned(),
+                version: env!("CARGO_PKG_VERSION").to_owned(),
+                features: tbp::Feature::enabled(),
+                rest: Default::default(),
+            }
+            .into(),
+        )
         .await
         .unwrap();
 
@@ -42,103 +46,96 @@ pub async fn run(
 
     while let Some(msg) = incoming.next().await {
         match msg {
-            FrontendMessage::Start {
-                hold, ref queue, ..
-            } => {
-                if hold.is_none() && queue.is_empty() {
-                    waiting_on_first_piece = Some(msg);
+            FrontendMessage::Start(start) => {
+                if start.hold.is_none() && start.queue.is_empty() {
+                    waiting_on_first_piece = Some(start);
                 } else {
-                    bot.start(create_bot(msg));
+                    bot.start(create_bot(start));
                 }
             }
-            FrontendMessage::Stop => {
+            FrontendMessage::Stop(_) => {
                 bot.stop();
                 waiting_on_first_piece = None;
             }
-            FrontendMessage::Suggest => {
+            FrontendMessage::Suggest(_) => {
                 if let Some((results, move_info)) = bot.suggest() {
                     outgoing
-                        .send(BotMessage::Suggestion {
-                            moves: results.into_iter().map(Into::into).collect(),
-                            move_info,
-                        })
+                        .send(
+                            bot_msg::Suggestion {
+                                moves: results.into_iter().map(Into::into).collect(),
+                                move_info,
+                                rest: Default::default(),
+                            }
+                            .into(),
+                        )
                         .await
                         .unwrap();
                 }
             }
-            FrontendMessage::Play { mv } => {
-                bot.advance(mv.into());
+            FrontendMessage::Play(play) => {
+                bot.advance(play.mv.into());
                 puffin::GlobalProfiler::lock().new_frame();
             }
-            FrontendMessage::NewPiece { piece } => {
-                if let Some(mut msg) = waiting_on_first_piece.take() {
-                    if let FrontendMessage::Start { queue, randomizer, .. } = &mut msg {
-                        if let RandomizerState::SevenBag { bag_state } = randomizer {
-                            bag_state.retain(|p| p != &piece);
-                        }
-                        queue.push(piece);
-                        bot.start(create_bot(msg));
-                    } else {
-                        unreachable!()
+            FrontendMessage::NewPiece(new_piece) => {
+                if let Some(mut start) = waiting_on_first_piece.take() {
+                    if let RandomizerState::SevenBag { bag_state } = &mut start.randomizer {
+                        bag_state.retain(|p| p != &new_piece.piece);
                     }
+                    start.queue.push(new_piece.piece);
+                    bot.start(create_bot(start));
                 } else {
-                    bot.new_piece(piece.into());
+                    bot.new_piece(new_piece.piece.into());
                 }
             }
-            FrontendMessage::Rules { randomizer: _ } => {
-                outgoing.send(BotMessage::Ready).await.unwrap();
+            FrontendMessage::Rules(_) => {
+                outgoing
+                    .send(bot_msg::Ready::default().into())
+                    .await
+                    .unwrap();
             }
-            FrontendMessage::Quit => break,
+            FrontendMessage::Quit(_) => break,
         }
     }
 }
 
-fn create_bot(start_msg: FrontendMessage) -> Bot {
-    if let FrontendMessage::Start {
-        hold,
-        queue,
-        combo,
-        back_to_back,
-        board,
-        randomizer,
-    } = start_msg
-    {
-        let mut queue = queue.into_iter().map(Into::into);
-        let reserve = hold.map_or_else(|| queue.next().unwrap(), Into::into);
-        let queue: Vec<_> = queue.collect();
+fn create_bot(start: frontend_msg::Start) -> Bot {
+    let mut queue = start.queue.into_iter().map(Into::into);
+    let reserve = start.hold.map_or_else(|| queue.next().unwrap(), Into::into);
+    let queue: Vec<_> = queue.collect();
 
-        let bag;
-        let speculate;
-        match randomizer {
-            RandomizerState::SevenBag { bag_state } => {
-                let mut bs: EnumSet<_> = bag_state.into_iter().map(Piece::from).collect();
-                for &p in queue.iter().rev() {
-                    if bs == EnumSet::all() {
-                        bs = EnumSet::empty();
-                    }
-                    bs.insert(p);
+    let bag;
+    let speculate;
+    match start.randomizer {
+        RandomizerState::SevenBag { bag_state } => {
+            let mut bs: EnumSet<_> = bag_state.into_iter().map(Piece::from).collect();
+            for &p in queue.iter().rev() {
+                if bs == EnumSet::all() {
+                    bs = EnumSet::empty();
                 }
-                bag = bs;
-                speculate = true;
+                bs.insert(p);
             }
-            _ => {
-                bag = EnumSet::all();
-                speculate = false;
-            }
-        };
+            bag = bs;
+            speculate = true;
+        }
+        _ => {
+            bag = EnumSet::all();
+            speculate = false;
+        }
+    };
 
-        let state = GameState {
-            reserve,
-            back_to_back,
-            combo: if combo > 255 { 255 } else { combo as u8 },
-            bag,
-            board: board.into(),
-        };
+    let state = GameState {
+        reserve,
+        back_to_back: start.back_to_back,
+        combo: if start.combo > 255 {
+            255
+        } else {
+            start.combo as u8
+        },
+        bag,
+        board: start.board.into(),
+    };
 
-        Bot::new(BotOptions { speculate }, state, &queue)
-    } else {
-        unreachable!();
-    }
+    Bot::new(BotOptions { speculate }, state, &queue)
 }
 
 fn spawn_workers(bot: &Arc<BotSyncronizer>) {
