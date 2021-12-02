@@ -1,0 +1,44 @@
+{
+  "freestyle_weights": {
+    "cell_coveredness": -0.2,
+    "max_cell_covered_height": 6,
+    "holes": -1.5,
+    "row_transitions": -0.1,
+    "height": -0.4,
+    "height_upper_half": -1.5,
+    "height_upper_quarter": -5.0,
+    "tetris_well_depth": 0.3,
+    "tslot": [
+      0.1,
+      1.5,
+      2.0,
+      4.0
+    ],
+    "has_back_to_back": 0.5,
+    "wasted_t": -1.5,
+    "softdrop": -0.2,
+    "normal_clears": [
+      0.0,
+      -2.0,
+      -1.5,
+      -1.0,
+      3.5
+    ],
+    "mini_spin_clears": [
+      0.0,
+      -1.5,
+      -1.0
+    ],
+    "spin_clears": [
+      0.0,
+      1.0,
+      4.0,
+      6.0
+    ],
+    "back_to_back_clear": 1.0,
+    "combo_attack": 1.5,
+    "perfect_clear": 15.0,
+    "perfect_clear_override": true
+  },
+  "freestyle_exploitation": 0.6931471805599453
+}

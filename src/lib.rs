@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use bot::BotOptions;
+use bot::{BotConfig, BotOptions};
 use enumset::EnumSet;
 use futures::prelude::*;
 use tbp::randomizer::RandomizerState;
@@ -23,6 +23,7 @@ mod sync;
 pub async fn run(
     mut incoming: impl Stream<Item = FrontendMessage> + Unpin,
     mut outgoing: impl Sink<BotMessage, Error = Infallible> + Unpin,
+    config: Arc<BotConfig>,
 ) {
     outgoing
         .send(
@@ -50,7 +51,7 @@ pub async fn run(
                 if start.hold.is_none() && start.queue.is_empty() {
                     waiting_on_first_piece = Some(start);
                 } else {
-                    bot.start(create_bot(start));
+                    bot.start(create_bot(start, config.clone()));
                 }
             }
             FrontendMessage::Stop(_) => {
@@ -82,7 +83,7 @@ pub async fn run(
                         bag_state.retain(|p| p != &new_piece.piece);
                     }
                     start.queue.push(new_piece.piece);
-                    bot.start(create_bot(start));
+                    bot.start(create_bot(start, config.clone()));
                 } else {
                     bot.new_piece(new_piece.piece.into());
                 }
@@ -98,7 +99,7 @@ pub async fn run(
     }
 }
 
-fn create_bot(start: frontend_msg::Start) -> Bot {
+fn create_bot(start: frontend_msg::Start, config: Arc<BotConfig>) -> Bot {
     let mut queue = start.queue.into_iter().map(Into::into);
     let reserve = start.hold.map_or_else(|| queue.next().unwrap(), Into::into);
     let queue: Vec<_> = queue.collect();
@@ -135,7 +136,7 @@ fn create_bot(start: frontend_msg::Start) -> Bot {
         board: start.board.into(),
     };
 
-    Bot::new(BotOptions { speculate }, state, &queue)
+    Bot::new(BotOptions { speculate, config }, state, &queue)
 }
 
 fn spawn_workers(bot: &Arc<BotSyncronizer>) {

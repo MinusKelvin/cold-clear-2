@@ -175,7 +175,9 @@ fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
     rotate(
         unkicked,
         board,
-        KICKS[from.piece as usize][from.rotation as usize].iter().copied(),
+        KICKS[from.piece as usize][from.rotation as usize]
+            .iter()
+            .copied(),
     )
 }
 
@@ -192,7 +194,9 @@ fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
     rotate(
         unkicked,
         board,
-        KICKS[from.piece as usize][from.rotation as usize].iter().copied(),
+        KICKS[from.piece as usize][from.rotation as usize]
+            .iter()
+            .copied(),
     )
 }
 

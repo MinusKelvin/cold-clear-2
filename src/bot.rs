@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
+use std::sync::Arc;
 
 use enum_dispatch::enum_dispatch;
+use once_cell::sync::Lazy;
+use serde::{Deserialize, Serialize};
 
 use crate::data::{GameState, Piece, Placement};
 
@@ -15,9 +18,24 @@ pub struct Bot {
     mode: ModeEnum,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct BotConfig {
+    pub freestyle_weights: freestyle::Weights,
+    pub freestyle_exploitation: f64,
+}
+
+impl Default for BotConfig {
+    fn default() -> Self {
+        static DEFAULT: Lazy<BotConfig> =
+            Lazy::new(|| serde_json::from_str(include_str!("default.json")).unwrap());
+        DEFAULT.clone()
+    }
+}
+
 #[derive(Debug)]
 pub struct BotOptions {
     pub speculate: bool,
+    pub config: Arc<BotConfig>,
 }
 
 #[enum_dispatch]

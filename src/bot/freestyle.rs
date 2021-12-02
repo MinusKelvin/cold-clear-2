@@ -3,6 +3,7 @@ use std::ops::Add;
 use enum_map::EnumMap;
 use enumset::EnumSet;
 use ordered_float::OrderedFloat;
+use serde::{Deserialize, Serialize};
 
 use super::{BotOptions, Mode, ModeSwitch, Statistics};
 use crate::dag::{ChildData, Dag, Evaluation};
@@ -43,7 +44,10 @@ impl Mode for Freestyle {
         let mut new_stats = Statistics::default();
         new_stats.selections += 1;
 
-        if let Some(node) = self.dag.select(options.speculate) {
+        if let Some(node) = self
+            .dag
+            .select(options.speculate, options.config.freestyle_exploitation)
+        {
             let (state, next) = node.state();
             let next_possibilities = next.map(EnumSet::only).unwrap_or(state.bag);
 
@@ -69,7 +73,8 @@ impl Mode for Freestyle {
                         let mut state = state;
                         let info = state.advance(next, mv);
 
-                        let (eval, reward) = evaluate(&DEFAULT_WEIGHTS, state, &info, sd_distance);
+                        let (eval, reward) =
+                            evaluate(&options.config.freestyle_weights, state, &info, sd_distance);
 
                         children[next].push(ChildData {
                             resulting_state: state,
@@ -91,53 +96,30 @@ impl Mode for Freestyle {
     }
 }
 
-struct Weights {
-    cell_coveredness: f32,
-    max_cell_covered_height: u32,
-    holes: f32,
-    row_transitions: f32,
-    height: f32,
-    height_upper_half: f32,
-    height_upper_quarter: f32,
-    tetris_well_depth: f32,
-    tslot: [f32; 4],
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Weights {
+    pub cell_coveredness: f32,
+    pub max_cell_covered_height: u32,
+    pub holes: f32,
+    pub row_transitions: f32,
+    pub height: f32,
+    pub height_upper_half: f32,
+    pub height_upper_quarter: f32,
+    pub tetris_well_depth: f32,
+    pub tslot: [f32; 4],
 
-    has_back_to_back: f32,
-    wasted_t: f32,
-    softdrop: f32,
+    pub has_back_to_back: f32,
+    pub wasted_t: f32,
+    pub softdrop: f32,
 
-    normal_clears: [f32; 5],
-    mini_spin_clears: [f32; 3],
-    spin_clears: [f32; 4],
-    back_to_back_clear: f32,
-    combo_attack: f32,
-    perfect_clear: f32,
-    perfect_clear_override: bool,
+    pub normal_clears: [f32; 5],
+    pub mini_spin_clears: [f32; 3],
+    pub spin_clears: [f32; 4],
+    pub back_to_back_clear: f32,
+    pub combo_attack: f32,
+    pub perfect_clear: f32,
+    pub perfect_clear_override: bool,
 }
-
-static DEFAULT_WEIGHTS: Weights = Weights {
-    cell_coveredness: -0.2,
-    max_cell_covered_height: 6,
-    holes: -1.5,
-    row_transitions: -0.1,
-    height: -0.4,
-    height_upper_half: -1.5,
-    height_upper_quarter: -5.0,
-    tetris_well_depth: 0.3,
-    tslot: [0.1, 1.5, 2.0, 4.0],
-
-    has_back_to_back: 0.5,
-    wasted_t: -1.5,
-    softdrop: -0.2,
-
-    normal_clears: [0.0, -2.0, -1.5, -1.0, 3.5],
-    mini_spin_clears: [0.0, -1.5, -1.0],
-    spin_clears: [0.0, 1.0, 4.0, 6.0],
-    back_to_back_clear: 1.0,
-    combo_attack: 1.5,
-    perfect_clear: 15.0,
-    perfect_clear_override: true,
-};
 
 fn evaluate(
     weights: &Weights,

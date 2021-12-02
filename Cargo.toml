@@ -25,6 +25,7 @@ parking_lot = "0.11.1"
 puffin = { version = "0.10.0" }
 puffin_http = { version = "0.7.0", optional = true }
 rand = "0.8.3"
+serde = { version = "1.0.130", features = ["derive"] }
 serde_json = "1.0.64"
 
 [dependencies.tbp]
@@ -33,6 +34,9 @@ features = [
     "randomizer",
     "move_info",
 ]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+structopt = "0.3.25"
 
 [features]
 
