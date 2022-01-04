@@ -44,23 +44,16 @@ impl BotSyncronizer {
         let bot = self.bot.read();
         bot.as_ref().map(|bot| {
             let state = self.state.lock();
-            (
-                bot.suggest(),
-                MoveInfo {
-                    nodes: Some(state.stats.nodes as f64),
-                    nps: Some(
-                        state.stats.nodes as f64 / state.last_advance.elapsed().as_secs_f64(),
-                    ),
-                    depth: None,
-                    extra: Some(format!(
-                        "{:.1}% of selections expanded, overall speed: {:.1} Mnps",
-                        state.stats.expansions as f64 / state.stats.selections as f64 * 100.0,
-                        state.nodes_since_start as f64
-                            / state.start.elapsed().as_secs_f64()
-                            / 1_000_000.0
-                    )),
-                },
-            )
+            let suggestion = bot.suggest();
+            let mut info = MoveInfo::new();
+            info.nodes = Some(state.stats.nodes as f64);
+            info.nps = Some(state.stats.nodes as f64 / state.last_advance.elapsed().as_secs_f64());
+            info.extra = Some(format!(
+                "{:.1}% of selections expanded, overall speed: {:.1} Mnps",
+                state.stats.expansions as f64 / state.stats.selections as f64 * 100.0,
+                state.nodes_since_start as f64 / state.start.elapsed().as_secs_f64() / 1_000_000.0
+            ));
+            (suggestion, info)
         })
     }
 

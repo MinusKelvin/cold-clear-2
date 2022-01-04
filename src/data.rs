@@ -1,8 +1,6 @@
 use enum_map::Enum;
 use enumset::{EnumSet, EnumSetType};
 
-pub use tbp::data::Spin;
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Board {
     pub cols: [u64; 10],
@@ -58,6 +56,13 @@ pub enum Rotation {
     West,
     South,
     East,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Spin {
+    None,
+    Mini,
+    Full,
 }
 
 impl Piece {
