@@ -70,13 +70,9 @@ impl<'bump, E: Evaluation> Layer<'bump, E> {
             return SelectResult::Failed;
         }
 
-        loop {
-            let s: f64 = thread_rng().gen();
-            let i = (-s.ln() / exploration) as usize;
-            if i < children.len() {
-                break SelectResult::Advance(self.piece, children[i].mv);
-            }
-        }
+        let s: f64 = thread_rng().gen();
+        let i = ((-s.ln() / exploration) % children.len() as f64) as usize;
+        SelectResult::Advance(self.piece, children[i].mv)
     }
 
     pub fn get_eval(&self, raw: u64) -> E {
