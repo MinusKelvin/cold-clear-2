@@ -4,16 +4,16 @@ use std::sync::Arc;
 use bot::{BotConfig, BotOptions};
 use enumset::EnumSet;
 use futures::prelude::*;
-use tbp::randomizer::{Bag, GeneralBag, RandomizerState};
-use tbp::{bot_msg, frontend_msg, BotMessage, FrontendMessage, MaybeUnknown};
+use tbp::Randomizer;
 
 use crate::bot::Bot;
-use crate::data::{GameState, Piece};
+use crate::data::GameState;
 use crate::sync::BotSyncronizer;
+use crate::tbp::{BotMessage, FrontendMessage};
 
 mod bot;
-mod convert;
 mod dag;
+mod tbp;
 #[macro_use]
 pub mod data;
 mod map;
@@ -26,15 +26,12 @@ pub async fn run(
     config: Arc<BotConfig>,
 ) {
     outgoing
-        .send(
-            bot_msg::Info::new(
-                "Cold Clear 2".to_owned(),
-                "MinusKelvin".to_owned(),
-                env!("CARGO_PKG_VERSION").to_owned(),
-                vec![],
-            )
-            .into(),
-        )
+        .send(BotMessage::Info {
+            name: "Cold Clear 2",
+            version: env!("CARGO_PKG_VERSION"),
+            author: "MinusKelvin",
+            features: &[],
+        })
         .await
         .unwrap();
 
@@ -46,130 +43,78 @@ pub async fn run(
 
     while let Some(msg) = incoming.next().await {
         match msg {
-            FrontendMessage::Start(mut start) => {
-                if let RandomizerState::SevenBag(bag) = start.randomizer {
-                    let mut bagged = GeneralBag::new(Bag::new(), Bag::new());
-                    bagged.filled_bag.i = 1;
-                    bagged.filled_bag.o = 1;
-                    bagged.filled_bag.t = 1;
-                    bagged.filled_bag.l = 1;
-                    bagged.filled_bag.j = 1;
-                    bagged.filled_bag.s = 1;
-                    bagged.filled_bag.z = 1;
-                    if bag.bag_state.is_empty() {
-                        bagged.current_bag = bagged.filled_bag.clone();
-                    }
-                    for p in bag.bag_state {
-                        bagged.current_bag[p] = 1;
-                    }
-                    start.randomizer = bagged.into();
-                }
+            FrontendMessage::Start(start) => {
                 if start.hold.is_none() && start.queue.is_empty() {
                     waiting_on_first_piece = Some(start);
                 } else {
-                    bot.start(create_bot(start, config.clone()).unwrap());
+                    bot.start(create_bot(start, config.clone()));
                 }
             }
-            FrontendMessage::Stop(_) => {
+            FrontendMessage::Stop => {
                 bot.stop();
                 waiting_on_first_piece = None;
             }
-            FrontendMessage::Suggest(_) => {
-                if let Some((results, move_info)) = bot.suggest() {
-                    let mut suggestion =
-                        bot_msg::Suggestion::new(results.into_iter().map(Into::into).collect());
-                    suggestion.move_info = move_info;
-                    outgoing.send(suggestion.into()).await.unwrap();
+            FrontendMessage::Suggest => {
+                if let Some((moves, move_info)) = bot.suggest() {
+                    outgoing
+                        .send(BotMessage::Suggestion { moves, move_info })
+                        .await
+                        .unwrap();
                 }
             }
-            FrontendMessage::Play(play) => {
-                bot.advance(play.mv.try_into().unwrap());
+            FrontendMessage::Play { mv } => {
+                bot.advance(mv);
                 puffin::GlobalProfiler::lock().new_frame();
             }
-            FrontendMessage::NewPiece(new_piece) => {
+            FrontendMessage::NewPiece { piece } => {
                 if let Some(mut start) = waiting_on_first_piece.take() {
-                    if let RandomizerState::GeneralBag(bagged) = &mut start.randomizer {
-                        if let Some(piece) = new_piece.piece.clone().known() {
-                            bagged.current_bag[piece] = 0;
+                    if let Randomizer::SevenBag { bag_state } = &mut start.randomizer {
+                        if bag_state.is_empty() {
+                            *bag_state = EnumSet::all();
                         }
+                        bag_state.remove(piece);
                     }
-                    start.queue.push(new_piece.piece);
-                    bot.start(create_bot(start, config.clone()).unwrap());
+                    start.queue.push(piece);
+                    bot.start(create_bot(start, config.clone()));
                 } else {
-                    bot.new_piece(new_piece.piece.try_into().unwrap());
+                    bot.new_piece(piece);
                 }
             }
-            FrontendMessage::Rules(_) => {
-                outgoing
-                    .send(bot_msg::Ready::default().into())
-                    .await
-                    .unwrap();
+            FrontendMessage::Rules => {
+                outgoing.send(BotMessage::Ready).await.unwrap();
             }
-            FrontendMessage::Quit(_) => break,
-            _ => {}
+            FrontendMessage::Quit => break,
+            FrontendMessage::Unknown => {}
         }
     }
 }
 
-fn create_bot(
-    start: frontend_msg::Start,
-    config: Arc<BotConfig>,
-) -> Result<Bot, convert::ConvertError> {
-    let mut queue = start.queue.into_iter().map(TryInto::try_into);
-    let reserve = start
-        .hold
-        .map_or_else(|| queue.next().unwrap(), TryInto::try_into)?;
-    let queue = queue.collect::<Result<Vec<_>, _>>()?;
+fn create_bot(mut start: tbp::Start, config: Arc<BotConfig>) -> Bot {
+    let reserve = start.hold.unwrap_or_else(|| start.queue.remove(0));
 
-    const TBP_PIECES: [tbp::data::Piece; 7] = [
-        tbp::data::Piece::I,
-        tbp::data::Piece::O,
-        tbp::data::Piece::T,
-        tbp::data::Piece::L,
-        tbp::data::Piece::J,
-        tbp::data::Piece::S,
-        tbp::data::Piece::Z,
-    ];
-
-    let bag;
-    let speculate;
-    match start.randomizer {
-        RandomizerState::GeneralBag(bagged)
-            if TBP_PIECES.iter().all(|p| bagged.filled_bag[p.clone()] == 1) =>
-        {
-            let mut bs = TBP_PIECES
-                .iter()
-                .filter(|&p| bagged.current_bag[p.clone()] == 1)
-                .map(|p| Piece::try_from(MaybeUnknown::Known(p.clone())).unwrap())
-                .collect::<EnumSet<_>>();
-            for &p in queue.iter().rev() {
-                if bs == EnumSet::all() {
-                    bs = EnumSet::empty();
+    let speculate = matches!(start.randomizer, Randomizer::SevenBag { .. });
+    let bag = match start.randomizer {
+        Randomizer::Unknown => EnumSet::all(),
+        Randomizer::SevenBag { mut bag_state } => {
+            for &p in start.queue.iter().rev() {
+                if bag_state == EnumSet::all() {
+                    bag_state = EnumSet::empty();
                 }
-                bs.insert(p);
+                bag_state.insert(p);
             }
-            bag = bs;
-            speculate = true;
-        }
-        _ => {
-            bag = EnumSet::all();
-            speculate = false;
+            bag_state
         }
     };
 
     let state = GameState {
         reserve,
         back_to_back: start.back_to_back,
-        combo: if start.combo > 255 {
-            255
-        } else {
-            start.combo as u8
-        },
+        combo: start.combo.try_into().unwrap_or(255),
         bag,
         board: start.board.into(),
     };
 
-    Ok(Bot::new(BotOptions { speculate, config }, state, &queue))
+    Bot::new(BotOptions { speculate, config }, state, &start.queue)
 }
 
 fn spawn_workers(bot: &Arc<BotSyncronizer>) {

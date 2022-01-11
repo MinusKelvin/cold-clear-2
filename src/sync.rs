@@ -1,10 +1,10 @@
 use std::time::Instant;
 
 use parking_lot::{Condvar, Mutex, RwLock};
-use tbp::move_info::MoveInfo;
 
 use crate::bot::{Bot, Statistics};
 use crate::data::{Piece, Placement};
+use crate::tbp::MoveInfo;
 
 pub struct BotSyncronizer {
     state: Mutex<State>,
@@ -45,14 +45,15 @@ impl BotSyncronizer {
         bot.as_ref().map(|bot| {
             let state = self.state.lock();
             let suggestion = bot.suggest();
-            let mut info = MoveInfo::new();
-            info.nodes = Some(state.stats.nodes as f64);
-            info.nps = Some(state.stats.nodes as f64 / state.last_advance.elapsed().as_secs_f64());
-            info.extra = Some(format!(
-                "{:.1}% of selections expanded, overall speed: {:.1} Mnps",
-                state.stats.expansions as f64 / state.stats.selections as f64 * 100.0,
-                state.nodes_since_start as f64 / state.start.elapsed().as_secs_f64() / 1_000_000.0
-            ));
+            let info = MoveInfo {
+                nodes: state.stats.nodes,
+                nps: state.stats.nodes as f64 / state.last_advance.elapsed().as_secs_f64(),
+                extra: format!(
+                    "{:.1}% of selections expanded, overall speed: {:.1} Mnps",
+                    state.stats.expansions as f64 / state.stats.selections as f64 * 100.0,
+                    state.nodes_since_start as f64 / state.start.elapsed().as_secs_f64() / 1_000_000.0
+                )
+            };
             (suggestion, info)
         })
     }

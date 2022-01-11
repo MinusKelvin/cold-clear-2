@@ -1,7 +1,9 @@
 use enum_map::Enum;
 use enumset::{EnumSet, EnumSetType};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Deserialize)]
+#[serde(from = "Vec<[Option<char>; 10]>")]
 pub struct Board {
     pub cols: [u64; 10],
 }
@@ -15,15 +17,17 @@ pub struct GameState {
     pub combo: u8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PieceLocation {
+    #[serde(rename = "type")]
     pub piece: Piece,
+    #[serde(rename = "orientation")]
     pub rotation: Rotation,
     pub x: i8,
     pub y: i8,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Placement {
     pub location: PieceLocation,
     pub spin: Spin,
@@ -39,7 +43,7 @@ pub struct PlacementInfo {
 }
 
 #[allow(clippy::derive_hash_xor_eq)]
-#[derive(EnumSetType, Enum, Debug, Hash)]
+#[derive(EnumSetType, Enum, Debug, Hash, Serialize, Deserialize)]
 pub enum Piece {
     I,
     O,
@@ -50,7 +54,8 @@ pub enum Piece {
     Z,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Rotation {
     North,
     West,
@@ -58,7 +63,8 @@ pub enum Rotation {
     East,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Spin {
     None,
     Mini,
