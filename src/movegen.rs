@@ -1,16 +1,39 @@
-use std::cmp::Ordering;
-use std::collections::BinaryHeap;
-
-use ahash::AHashMap;
-
 use crate::data::*;
+
+pub struct PlacementMap {
+    data: [[[bool; 4]; 25]; 10]
+}
+
+impl PlacementMap {
+    #[inline]
+    #[must_use]
+    pub const fn new() -> Self {
+        PlacementMap { data: [[[false; 4]; 25]; 10] }
+    }
+
+    #[inline]
+    pub fn get(&mut self, placement: &Placement) -> bool {
+        self.data[placement.location.x as usize][placement.location.y as usize][placement.location.rotation as usize]
+    }
+
+    #[inline]
+    pub fn set(&mut self, placement: &Placement, value: bool) {
+        self.data[placement.location.x as usize][placement.location.y as usize][placement.location.rotation as usize] = value;
+    }
+
+    pub fn clear(&mut self) {
+        self.data = [[[false; 4]; 25]; 10];
+    }
+}
 
 pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
     puffin::profile_function!();
-    let mut queue = BinaryHeap::new();
-    let mut values = AHashMap::new();
-    let mut underground_locks = AHashMap::new();
+    let mut queue = Vec::with_capacity(1000);
     let mut locks = Vec::with_capacity(64);
+    let mut queue_map = PlacementMap::new();
+    let mut locks_map = PlacementMap::new();
+
+    let mut init_y: i32 = 19;
 
     let fast_mode = board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16);
     if fast_mode {
@@ -37,24 +60,48 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                     spin: Spin::None,
                 };
 
-                let mut update_position =
-                    update_position(&mut queue, &mut values, fast_mode, board);
-
-                if let Some(mv) = shift(location, board, -1) {
-                    update_position(mv, distance as u32);
-                }
-                if let Some(mv) = shift(location, board, 1) {
-                    update_position(mv, distance as u32);
-                }
-                if let Some(mv) = rotate_cw(location, board) {
-                    update_position(mv, distance as u32);
-                }
-                if let Some(mv) = rotate_ccw(location, board) {
-                    update_position(mv, distance as u32);
-                }
-
                 if location.canonical_form() == location {
                     locks.push((mv, 0));
+                }
+                
+                if let Some(right) = shift(mv.location, board, 1) {
+                    if  !right.location.above_stack(board) {
+                        if !queue_map.get(&right) {
+                            queue.push(right);
+                            queue_map.set(&right, true);
+                        }
+                    }
+                }
+            
+                if let Some(left) = shift(mv.location, board, -1) {
+                    if !left.location.above_stack(board) {
+                        if !queue_map.get(&left) {
+                            queue.push(left);
+                            queue_map.set(&left, true);
+                        }
+                    }
+                }
+
+                if piece == Piece::O {
+                    continue;
+                }
+            
+                if let Some(cw) = rotate_cw(mv.location, board) {
+                    if !cw.location.above_stack(board) {
+                        if !queue_map.get(&cw) {
+                            queue.push(cw);
+                            queue_map.set(&cw, true);
+                        }
+                    }
+                }
+            
+                if let Some(ccw) = rotate_ccw(mv.location, board) {
+                    if !ccw.location.above_stack(board) {
+                        if !queue_map.get(&ccw) {
+                            queue.push(ccw);
+                            queue_map.set(&ccw, true);
+                        }
+                    }
                 }
             }
         }
@@ -67,6 +114,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
         };
         if spawned.obstructed(board) {
             spawned.y += 1;
+            init_y = 20;
             if spawned.obstructed(board) {
                 return vec![];
             }
@@ -75,79 +123,89 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             location: spawned,
             spin: Spin::None,
         };
-        queue.push(Intermediate {
-            soft_drops: 0,
-            mv: spawned,
-        });
-        values.insert(spawned, 0);
+
+        queue.push(spawned);
+        queue_map.set(&spawned, true);
     }
 
-    while let Some(expand) = queue.pop() {
-        if expand.soft_drops != values.get(&expand.mv).copied().unwrap_or(40) {
-            continue;
-        }
-
-        let drop_dist = expand.mv.location.drop_distance(board);
-        let dropped = Placement {
-            location: PieceLocation {
-                y: expand.mv.location.y - drop_dist,
-                ..expand.mv.location
-            },
-            spin: if drop_dist == 0 {
-                expand.mv.spin
-            } else {
-                Spin::None
-            },
-        };
-
-        let sds = underground_locks
-            .entry(Placement {
-                location: dropped.location.canonical_form(),
-                ..dropped
-            })
-            .or_insert(expand.soft_drops);
-        *sds = expand.soft_drops.min(*sds);
-
-        let mut update_position = update_position(&mut queue, &mut values, fast_mode, board);
-
-        update_position(dropped, expand.soft_drops + drop_dist as u32);
-
-        if let Some(mv) = shift(expand.mv.location, board, -1) {
-            update_position(mv, expand.soft_drops);
-        }
-        if let Some(mv) = shift(expand.mv.location, board, 1) {
-            update_position(mv, expand.soft_drops);
-        }
-        if let Some(mv) = rotate_cw(expand.mv.location, board) {
-            update_position(mv, expand.soft_drops);
-        }
-        if let Some(mv) = rotate_ccw(expand.mv.location, board) {
-            update_position(mv, expand.soft_drops);
-        }
+    while let Some(mut placement) = queue.pop() {
+        try_expand(&mut queue, &mut queue_map, board, &mut placement, fast_mode);
+        try_lock(&mut locks, &mut locks_map, board, &mut placement, init_y);
     }
 
-    locks.extend(underground_locks.into_iter());
     locks
 }
 
-fn update_position<'a>(
-    queue: &'a mut BinaryHeap<Intermediate>,
-    values: &'a mut AHashMap<Placement, u32>,
-    fast_mode: bool,
-    board: &'a Board,
-) -> impl FnMut(Placement, u32) + 'a {
-    move |target: Placement, soft_drops: u32| {
-        if fast_mode && target.location.above_stack(board) {
-            return;
+fn try_expand(
+    queue: &mut Vec<Placement>,
+    queue_map: &mut PlacementMap,
+    board: &Board,
+    placement: &mut Placement,
+    fast_mode: bool
+) {
+    let mut drop = placement.clone();
+    let drop_distance = drop.location.drop_distance(board);
+    drop.location.y -= drop_distance;
+    if drop_distance > 0 && !(fast_mode && drop.location.above_stack(board)) && !queue_map.get(&drop)  {
+        queue.push(drop);
+        queue_map.set(&drop, true);
+    }
+
+    if let Some(right) = shift(placement.location, board, 1) {
+        if !(fast_mode && right.location.above_stack(board)) && !queue_map.get(&right) {
+            queue.push(right);
+            queue_map.set(&right, true);
         }
-        let prev_sds = values.entry(target).or_insert(40);
-        if soft_drops < *prev_sds {
-            *prev_sds = soft_drops;
-            queue.push(Intermediate {
-                soft_drops,
-                mv: target,
-            });
+    }
+
+    if let Some(left) = shift(placement.location, board, -1) {
+        if !(fast_mode && left.location.above_stack(board)) && !queue_map.get(&left) {
+            queue.push(left);
+            queue_map.set(&left, true);
         }
+    }
+
+    if placement.location.piece == Piece::O {
+        return;
+    }
+
+    if let Some(cw) = rotate_cw(placement.location, board) {
+        if !(fast_mode && cw.location.above_stack(board)) && !queue_map.get(&cw) {
+            queue.push(cw);
+            queue_map.set(&cw, true);
+        }
+    }
+
+    if let Some(ccw) = rotate_ccw(placement.location, board) {
+        if !(fast_mode && ccw.location.above_stack(board)) && !queue_map.get(&ccw) {
+            queue.push(ccw);
+            queue_map.set(&ccw, true);
+        }
+    }
+}
+
+fn try_lock(
+    locks: &mut Vec<(Placement, u32)>,
+    locks_map: &mut PlacementMap,
+    board: &Board,
+    placement: &mut Placement,
+    init_y: i32
+) {
+    let distance = placement.location.drop_distance(board);
+    placement.location.y -= distance;
+
+    if placement.location.y >= 20 {
+        return;
+    }
+    let softdrop = 0;
+    if !placement.location.above_stack(board) {
+        softdrop = (init_y - placement.location.y as i32).max(0) as u32;
+    }
+
+    placement.location = placement.location.canonical_form();
+    if !locks_map.get(&placement) {
+        locks.push((*placement, softdrop));
+        locks_map.set(placement, true);
     }
 }
 
@@ -280,28 +338,4 @@ fn rotate(
     }
 
     None
-}
-
-#[derive(Clone, Copy, Debug, Eq)]
-struct Intermediate {
-    mv: Placement,
-    soft_drops: u32,
-}
-
-impl PartialEq for Intermediate {
-    fn eq(&self, other: &Intermediate) -> bool {
-        self.soft_drops == other.soft_drops
-    }
-}
-
-impl Ord for Intermediate {
-    fn cmp(&self, other: &Intermediate) -> Ordering {
-        self.soft_drops.cmp(&other.soft_drops)
-    }
-}
-
-impl PartialOrd for Intermediate {
-    fn partial_cmp(&self, other: &Intermediate) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
