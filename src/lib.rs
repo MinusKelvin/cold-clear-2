@@ -28,7 +28,7 @@ pub async fn run(
     outgoing
         .send(BotMessage::Info {
             name: "Cold Clear 2",
-            version: env!("CARGO_PKG_VERSION"),
+            version: concat!(env!("CARGO_PKG_VERSION"), " ", env!("GIT_HASH")),
             author: "MinusKelvin",
             features: &[],
         })
@@ -118,7 +118,7 @@ fn create_bot(mut start: tbp::Start, config: Arc<BotConfig>) -> Bot {
 }
 
 fn spawn_workers(bot: &Arc<BotSyncronizer>) {
-    for _ in 0..4 {
+    for _ in 0..1 {
         let bot = bot.clone();
         std::thread::spawn(move || bot.work_loop());
     }
