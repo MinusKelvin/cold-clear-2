@@ -95,7 +95,7 @@ impl Rotation {
         }
     }
 
-    const fn rotate_cells(self, cells: [(i8, i8); 4]) -> [(i8, i8); 4] {
+    pub const fn rotate_cells(self, cells: [(i8, i8); 4]) -> [(i8, i8); 4] {
         [
             self.rotate_cell(cells[0]),
             self.rotate_cell(cells[1]),

@@ -11,6 +11,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
     let mut values = AHashMap::new();
     let mut underground_locks = AHashMap::new();
     let mut locks = Vec::with_capacity(64);
+    let collision_map = CollisionMaps::new(board, piece);
 
     let fast_mode = board.cols.iter().all(|&c| c.leading_zeros() > 64 - 16);
     if fast_mode {
@@ -27,7 +28,7 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                     x,
                     y: 19,
                 };
-                if location.obstructed(board) {
+                if collision_map.obstructed(location) {
                     continue;
                 }
                 let distance = location.drop_distance(board);
@@ -40,16 +41,16 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
                 let mut update_position =
                     update_position(&mut queue, &mut values, fast_mode, board);
 
-                if let Some(mv) = shift(location, board, -1) {
+                if let Some(mv) = shift(location, &collision_map, -1) {
                     update_position(mv, distance as u32);
                 }
-                if let Some(mv) = shift(location, board, 1) {
+                if let Some(mv) = shift(location, &collision_map, 1) {
                     update_position(mv, distance as u32);
                 }
-                if let Some(mv) = rotate_cw(location, board) {
+                if let Some(mv) = rotate_cw(location, &collision_map, board) {
                     update_position(mv, distance as u32);
                 }
-                if let Some(mv) = rotate_ccw(location, board) {
+                if let Some(mv) = rotate_ccw(location, &collision_map, board) {
                     update_position(mv, distance as u32);
                 }
 
@@ -65,9 +66,9 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
             x: 4,
             y: 19,
         };
-        if spawned.obstructed(board) {
+        if collision_map.obstructed(spawned) {
             spawned.y += 1;
-            if spawned.obstructed(board) {
+            if collision_map.obstructed(spawned) {
                 return vec![];
             }
         }
@@ -112,16 +113,16 @@ pub fn find_moves(board: &Board, piece: Piece) -> Vec<(Placement, u32)> {
 
         update_position(dropped, expand.soft_drops + drop_dist as u32);
 
-        if let Some(mv) = shift(expand.mv.location, board, -1) {
+        if let Some(mv) = shift(expand.mv.location, &collision_map, -1) {
             update_position(mv, expand.soft_drops);
         }
-        if let Some(mv) = shift(expand.mv.location, board, 1) {
+        if let Some(mv) = shift(expand.mv.location, &collision_map, 1) {
             update_position(mv, expand.soft_drops);
         }
-        if let Some(mv) = rotate_cw(expand.mv.location, board) {
+        if let Some(mv) = rotate_cw(expand.mv.location, &collision_map, board) {
             update_position(mv, expand.soft_drops);
         }
-        if let Some(mv) = rotate_ccw(expand.mv.location, board) {
+        if let Some(mv) = rotate_ccw(expand.mv.location, &collision_map, board) {
             update_position(mv, expand.soft_drops);
         }
     }
@@ -151,9 +152,9 @@ fn update_position<'a>(
     }
 }
 
-fn shift(mut location: PieceLocation, board: &Board, dx: i8) -> Option<Placement> {
+fn shift(mut location: PieceLocation, collision_map: &CollisionMaps, dx: i8) -> Option<Placement> {
     location.x += dx;
-    if location.obstructed(board) {
+    if collision_map.obstructed(location) {
         return None;
     }
     Some(Placement {
@@ -162,7 +163,11 @@ fn shift(mut location: PieceLocation, board: &Board, dx: i8) -> Option<Placement
     })
 }
 
-fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
+fn rotate_cw(
+    from: PieceLocation,
+    collision_map: &CollisionMaps,
+    board: &Board,
+) -> Option<Placement> {
     if from.piece == Piece::O {
         return None;
     }
@@ -174,6 +179,7 @@ fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
     };
     rotate(
         unkicked,
+        collision_map,
         board,
         KICKS[from.piece as usize][from.rotation as usize]
             .iter()
@@ -181,7 +187,11 @@ fn rotate_cw(from: PieceLocation, board: &Board) -> Option<Placement> {
     )
 }
 
-fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
+fn rotate_ccw(
+    from: PieceLocation,
+    collision_map: &CollisionMaps,
+    board: &Board,
+) -> Option<Placement> {
     if from.piece == Piece::O {
         return None;
     }
@@ -193,6 +203,7 @@ fn rotate_ccw(from: PieceLocation, board: &Board) -> Option<Placement> {
     };
     rotate(
         unkicked,
+        collision_map,
         board,
         KICKS[from.piece as usize][from.rotation as usize]
             .iter()
@@ -237,6 +248,7 @@ const fn kicks(piece: Piece, from: Rotation, to: Rotation) -> [(i8, i8); 5] {
 
 fn rotate(
     unkicked: PieceLocation,
+    collision_map: &CollisionMaps,
     board: &Board,
     kicks: impl Iterator<Item = (i8, i8)>,
 ) -> Option<Placement> {
@@ -246,7 +258,7 @@ fn rotate(
             y: unkicked.y + dy,
             ..unkicked
         };
-        if target.obstructed(board) {
+        if collision_map.obstructed(target) {
             continue;
         }
 
@@ -303,5 +315,42 @@ impl Ord for Intermediate {
 impl PartialOrd for Intermediate {
     fn partial_cmp(&self, other: &Intermediate) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+struct CollisionMaps {
+    boards: [[u64; 10]; 4],
+}
+
+impl CollisionMaps {
+    fn new(board: &Board, piece: Piece) -> Self {
+        let mut boards = [[0; 10]; 4];
+        for rot in [
+            Rotation::North,
+            Rotation::West,
+            Rotation::South,
+            Rotation::East,
+        ] {
+            for (dx, dy) in rot.rotate_cells(piece.cells()) {
+                for x in 0..10 {
+                    let c = board.cols.get((x + dx) as usize).copied().unwrap_or(!0);
+                    let c = match dy < 0 {
+                        true => !(!c << -dy),
+                        false => c >> dy,
+                    };
+                    boards[rot as usize][x as usize] |= c;
+                }
+            }
+        }
+        CollisionMaps { boards }
+    }
+
+    fn obstructed(&self, piece: PieceLocation) -> bool {
+        let v = piece.y < 0
+            || self.boards[piece.rotation as usize]
+                .get(piece.x as usize)
+                .map(|&c| c & 1 << piece.y != 0)
+                .unwrap_or(true);
+        v
     }
 }
